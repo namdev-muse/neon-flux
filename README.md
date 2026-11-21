@@ -38,9 +38,14 @@ late and the floor spikes get you. Flips only work while standing on a surface
 ## Game feel
 
 Pooled particles, trauma screen shake, hit-stop and slow-mo on death,
-Web Audio synth SFX and a looping bass-and-arp soundtrack, floating score
-pops, a live attract-mode demo playing behind the menu, and a screen-stack
-menu with staggered pops and hover ticks.
+near-miss slow-mo when a saw sweeps past, a camera that leans into the run
+with lookahead and a zoom pulse on every flip, squash & stretch on flip and
+landing, shockwave rings on flip/checkpoint/exit, an orb combo pitch ladder,
+crusher-slam dust, Web Audio synth SFX and a looping bass + arp + pad +
+hats soundtrack, floating score pops, a live attract-mode demo playing
+behind the menu, and a screen-stack menu with staggered pops and hover
+ticks. Screen shake (0–100%) and flashing effects can both be turned down
+or off in Settings; every effect decays back to its exact rest state.
 
 ## Anti-slop
 

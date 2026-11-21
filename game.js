@@ -1,4 +1,4 @@
-// Neon Flux v0.2.0 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
+// Neon Flux v0.3.0 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
 // Presentation layer: rendering, input, screens, audio, game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns
 // everything the player sees and hears. No build step, no Three.js.
@@ -6,6 +6,7 @@ import {
   VERSION, TILE, ROWS, DT, LEVELS, levelById, parseLevel, createRun,
   stepRun, drainEvents, createDecisionBot, defaultSave, serializeSave,
   parseSave, recordBest, isLevelUnlocked, FEEDBACK, SAVE_VERSION,
+  SAW_RADIUS, PLAYER_W, PLAYER_H,
 } from './physics.js';
 
 const $ = (id) => document.getElementById(id);
@@ -76,8 +77,15 @@ function noise({ dur = 0.15, vol = 0.25, freq = 1200, when = 0 }) {
 }
 const SFX = {
   flip() { tone({ freq: 320, freqEnd: 880, dur: 0.14, type: 'sine', vol: 0.22 }); noise({ dur: 0.08, vol: 0.08, freq: 2400 }); },
-  orb() { tone({ freq: 880, dur: 0.07, type: 'sine', vol: 0.18 }); tone({ freq: 1318, dur: 0.1, type: 'sine', vol: 0.14, when: 0.05 }); },
+  orb(combo = 1) {
+    // Pitch ladder: consecutive orbs within the combo window climb.
+    const m = 1 + Math.min(combo - 1, 7) * 0.06;
+    tone({ freq: 880 * m, dur: 0.07, type: 'sine', vol: 0.18 });
+    tone({ freq: 1318 * m, dur: 0.1, type: 'sine', vol: 0.14, when: 0.05 });
+  },
   death() { noise({ dur: 0.25, vol: 0.3, freq: 900 }); tone({ freq: 220, freqEnd: 55, dur: 0.3, type: 'sawtooth', vol: 0.2 }); },
+  respawn() { tone({ freq: 392, dur: 0.09, type: 'sine', vol: 0.14 }); tone({ freq: 587, dur: 0.12, type: 'sine', vol: 0.12, when: 0.07 }); },
+  nearMiss() { noise({ dur: 0.18, vol: 0.12, freq: 3200 }); tone({ freq: 1200, freqEnd: 1800, dur: 0.12, type: 'sine', vol: 0.06 }); },
   checkpoint() { tone({ freq: 523, dur: 0.09, type: 'triangle', vol: 0.18 }); tone({ freq: 784, dur: 0.12, type: 'triangle', vol: 0.18, when: 0.08 }); },
   exit() { [523, 659, 784, 1047].forEach((f, i) => tone({ freq: f, dur: 0.14, type: 'triangle', vol: 0.18, when: i * 0.09 })); },
   slam() { tone({ freq: 140, freqEnd: 60, dur: 0.12, type: 'sine', vol: 0.25 }); noise({ dur: 0.08, vol: 0.12, freq: 500 }); },
@@ -85,11 +93,30 @@ const SFX = {
   hover() { tone({ freq: 990, dur: 0.03, type: 'sine', vol: 0.05 }); },
   land() { noise({ dur: 0.05, vol: 0.06, freq: 700 }); },
 };
-// Simple music loop: a slow minor-key bass pulse + sparse arp, scheduled
-// a bar ahead so it never stutters. Starts on first user gesture.
+// Simple music loop: a slow minor-key bass pulse + sparse arp + soft pad
+// chords + hat ticks, scheduled a bar ahead so it never stutters. Starts
+// on first user gesture. Am – F – C – G, one chord per bar.
 const MUSIC_BASS = [55, 55, 65.41, 49]; // A1 A1 C2 G1
 const MUSIC_ARP = [220, 261.63, 329.63, 440, 329.63, 261.63];
+const MUSIC_PADS = [
+  [110, 130.81, 164.81], // Am: A2 C3 E3
+  [87.31, 130.81, 174.61], // F: F2 C3 F3
+  [130.81, 164.81, 196], // C: C3 E3 G3
+  [98, 146.83, 196], // G: G2 D3 G3
+];
 let musicStep = 0;
+function padNote(freq, dur) {
+  if (!audioCtx || muted) return;
+  const t0 = audioCtx.currentTime;
+  for (const det of [-4, 4]) {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = 'triangle'; o.frequency.value = freq; o.detune.value = det;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.4);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    o.connect(g); g.connect(musicGain); o.start(t0); o.stop(t0 + dur);
+  }
+}
 function musicTick() {
   if (!audioCtx || muted) return;
   const bar = 0.46; // ~130bpm eighth notes
@@ -111,6 +138,15 @@ function musicTick() {
     g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + bar);
     o.connect(g); g.connect(musicGain); o.start(); o.stop(audioCtx.currentTime + bar);
   }
+  // Pad chord on each bar start (every 8 eighth-notes).
+  if (musicStep % 8 === 0) {
+    const chord = MUSIC_PADS[(musicStep / 8 | 0) % MUSIC_PADS.length];
+    for (const f of chord) padNote(f, bar * 8);
+  }
+  // Hat tick on the offbeats, only while actually playing a level.
+  if (musicStep % 2 === 1 && phase === 'playing') {
+    noise({ dur: 0.03, vol: 0.05, freq: 6000 });
+  }
   musicStep++;
 }
 function startMusic() {
@@ -124,6 +160,16 @@ function setMuted(m) {
   persistSave();
   if (masterGain) masterGain.gain.value = muted ? 0 : 0.5;
   updateMuteLabels();
+}
+function setFlash(on) {
+  save.settings.flash = !!on;
+  persistSave();
+  if (!on) flashT = 0; // toggling off clears any flash already on screen
+  updateFlashLabel();
+}
+function updateFlashLabel() {
+  const el = $('btn-flash-settings');
+  if (el) el.textContent = save.settings.flash === false ? 'Flashing: Off' : 'Flashing: On';
 }
 
 // ---------------------------------------------------------------- canvas
@@ -144,17 +190,28 @@ resize();
 // (so the HUD never covers the ceiling row). Width follows aspect ratio.
 // World -> screen: sx = (wx - camX) * scale + shakeX,
 // sy = HUD_H + wy * scale + shakeY.
+// The camera follows with velocity lookahead (it leans into the run
+// direction) and smooths toward its target instead of snapping, so the
+// view glides; a flip fires a short zoom pulse (visual only — the rig
+// never moves colliders).
 const HUD_H = 56;
-let camX = 0, camScale = 1;
-function computeCamera() {
-  camScale = (viewH - HUD_H) / (ROWS * TILE);
-  const viewWorldW = viewW / camScale;
+let camX = 0, camScale = 1, camScaleBase = 1, zoomT = 0, camSnap = true;
+function computeCamera(dt) {
+  camScaleBase = (viewH - HUD_H) / (ROWS * TILE);
+  camScale = camScaleBase * (1 + 0.05 * zoomT);
+  const viewWorldW = viewW / camScaleBase;
   // Follow the active run — the game run, or the attract demo in the menu.
   const active = run || demoRun;
   const levelW = active ? active.level.width : 960;
-  const target = active ? active.player.x + 12 - viewWorldW * 0.42 : 0;
-  camX = clamp(target, 0, Math.max(0, levelW - viewWorldW));
-  if (levelW <= viewWorldW) camX = (levelW - viewWorldW) / 2;
+  const look = active ? clamp(active.player.vx * 0.35, -140, 140) : 0;
+  const target = active ? active.player.x + 12 + look - viewWorldW * 0.42 : 0;
+  const clamped = clamp(target, 0, Math.max(0, levelW - viewWorldW));
+  if (levelW <= viewWorldW) { camX = (levelW - viewWorldW) / 2; camSnap = false; return; }
+  if (camSnap) { camX = clamped; camSnap = false; return; }
+  // Critically-damped-ish smoothing: fast enough to keep the player on
+  // screen, slow enough to read as a glide (~90ms time constant).
+  const k = 1 - Math.exp(-11 * Math.max(dt, 0.001));
+  camX += (clamped - camX) * k;
 }
 function wx2sx(wx) { return (wx - camX) * camScale + shakeX; }
 function wy2sy(wy) { return HUD_H + wy * camScale + shakeY; }
@@ -171,18 +228,30 @@ function playerScreenPos() {
 // ---------------------------------------------------------------- feel
 let trauma = 0, shakeX = 0, shakeY = 0, hitStopT = 0, slowMoT = 0, timeScale = 1;
 let flashT = 0, flashColor = '255,255,255';
+let stretchT = 0, squashT = 0; // squash & stretch timers (flip / landing)
+let orbCombo = 0, lastOrbAt = 0, nearMisses = 0, lastNearMissAt = -10;
 function addTrauma(a) { trauma = Math.min(1, trauma + a * (save.settings.shake ?? 1)); }
 function doHitStop(s) { hitStopT = Math.max(hitStopT, s); }
 function doSlowMo(s) { slowMoT = Math.max(slowMoT, s); }
-function flash(color, t = 0.18) { flashColor = color; flashT = Math.max(flashT, t); }
+// Flashes honour the reduce-flashing toggle (default on); with it off,
+// flash() is a no-op and no event leaves a flash on screen.
+function flash(color, t = 0.18) {
+  if (save.settings.flash === false) return;
+  flashColor = color; flashT = Math.max(flashT, t);
+}
 function updateFeel(dt) {
   if (hitStopT > 0) hitStopT -= dt;
   if (slowMoT > 0) { slowMoT -= dt; timeScale = 0.3; } else timeScale = 1;
+  // Trauma decays in REAL time so the shake keeps settling during
+  // hit-stop instead of freezing the camera off-centre.
   trauma = Math.max(0, trauma - dt * 1.6);
   const sh = trauma * trauma * 14;
   shakeX = (Math.random() * 2 - 1) * sh;
   shakeY = (Math.random() * 2 - 1) * sh;
   if (flashT > 0) flashT -= dt;
+  if (zoomT > 0) zoomT = Math.max(0, zoomT - dt * 3.5);
+  if (stretchT > 0) stretchT = Math.max(0, stretchT - dt);
+  if (squashT > 0) squashT = Math.max(0, squashT - dt);
 }
 // Pooled particles (no allocation in the hot loop).
 const MAX_PARTICLES = 320;
@@ -221,6 +290,37 @@ function updatePops(dt) {
     const p = pops[i]; p.life -= dt; p.y -= 34 * dt;
     if (p.life <= 0) pops.splice(i, 1);
   }
+}
+// Shockwave rings: expanding stroked circles (flip whoosh, checkpoint,
+// exit). Short-lived, always decay to nothing — no rest-state leak.
+const shockwaves = [];
+function spawnShockwave(x, y, color, maxR = 90, life = 0.45, width = 4) {
+  shockwaves.push({ x, y, color, maxR, life, maxLife: life, width });
+  if (shockwaves.length > 12) shockwaves.shift();
+}
+function updateShockwaves(dt) {
+  for (let i = shockwaves.length - 1; i >= 0; i--) {
+    shockwaves[i].life -= dt;
+    if (shockwaves[i].life <= 0) shockwaves.splice(i, 1);
+  }
+}
+function drawShockwaves() {
+  const s = camScale;
+  ctx.save();
+  for (const w of shockwaves) {
+    const t = 1 - w.life / w.maxLife; // 0 -> 1
+    const r = (8 + (w.maxR - 8) * (1 - Math.pow(1 - t, 3))) * s;
+    const sx = wx2sx(w.x), sy = wy2sy(w.y);
+    ctx.globalAlpha = (1 - t) * 0.9;
+    ctx.strokeStyle = w.color;
+    ctx.lineWidth = Math.max(1, w.width * s * (1 - t * 0.6));
+    ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.stroke();
+    // Inner echo ring, half the radius.
+    ctx.globalAlpha = (1 - t) * 0.4;
+    ctx.beginPath(); ctx.arc(sx, sy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
 }
 // Player trail (recent positions, for the motion streak).
 const trail = [];
@@ -356,9 +456,12 @@ function startLevel(id) {
   levelId = id; selectedLevel = id;
   run = createRun(id);
   autopilot = null; demoRun = null;
-  trail.length = 0; pops.length = 0;
+  trail.length = 0; pops.length = 0; shockwaves.length = 0;
   for (const p of particles) p.alive = false;
   trauma = 0; hitStopT = 0; slowMoT = 0; timeScale = 1;
+  zoomT = 0; stretchT = 0; squashT = 0;
+  orbCombo = 0; lastOrbAt = 0; nearMisses = 0; lastNearMissAt = -10;
+  camSnap = true;
   screenStack.length = 0;
   phase = 'playing';
   showScreen('playing');
@@ -430,17 +533,30 @@ function handleEvents(events) {
       case 'flip':
         SFX.flip();
         burst(p.x + 12, p.y + 16, 10, COL.player, 160, 0.4, 2.5);
+        spawnShockwave(p.x + 12, p.y + 16, COL.player, 90, 0.45, 4);
+        zoomT = 1; // camera zoom pulse (visual only)
+        stretchT = 0.14; // stretch along the flip axis
         break;
-      case 'orb':
-        SFX.orb();
+      case 'orb': {
+        const now = performance.now();
+        orbCombo = (now - lastOrbAt < 1500) ? orbCombo + 1 : 1;
+        lastOrbAt = now;
+        SFX.orb(orbCombo);
         burst(e.x, e.y, 12, COL.orb, 200, 0.5, 3);
-        addPop(e.x, e.y - 14, '+100', COL.orb);
+        addPop(e.x, e.y - 14, orbCombo > 1 ? `+100 ×${orbCombo}` : '+100', COL.orb);
         break;
+      }
       case 'checkpoint':
         SFX.checkpoint();
         burst(e.x, e.y, 16, COL.checkpoint, 180, 0.7, 3);
+        spawnShockwave(e.x, e.y, COL.checkpoint, 70, 0.5, 3);
         flash('167,139,250', 0.12);
         toast('Checkpoint', 1400);
+        break;
+      case 'respawn':
+        SFX.respawn();
+        spawnShockwave(e.x, e.y, COL.player, 60, 0.4, 3);
+        flash('34,211,238', 0.1);
         break;
       case 'death':
         SFX.death();
@@ -453,11 +569,16 @@ function handleEvents(events) {
       case 'exit':
         SFX.exit();
         burst(p.x + 12, p.y + 16, 40, COL.exit, 300, 1.0, 4);
+        spawnShockwave(p.x + 12, p.y + 16, COL.exit, 140, 0.7, 5);
         flash('52,211,153', 0.25);
         break;
       case 'crusherSlam':
         SFX.slam();
         addTrauma(FEEDBACK.crusherSlam.trauma);
+        // Dust kicked up where the crusher meets its surface.
+        burst(e.x, e.y + 36, 10, '#fbbf24', 140, 0.5, 3);
+        burst(e.x - 18, e.y + 36, 5, '#94a3b8', 90, 0.4, 2);
+        burst(e.x + 18, e.y + 36, 5, '#94a3b8', 90, 0.4, 2);
         break;
       default: break;
     }
@@ -539,8 +660,9 @@ function frame(now) {
   if (steps === 5) accumulator = 0; // spiral-of-death guard
   updateParticles(rawDt);
   updatePops(rawDt);
+  updateShockwaves(rawDt);
   updateTrail(rawDt);
-  computeCamera();
+  computeCamera(rawDt);
   render();
 }
 function stepGame(dt) {
@@ -562,10 +684,31 @@ function stepGame(dt) {
   stepRun(run, input, DT);
   const events = drainEvents(run);
   handleEvents(events);
-  // Landing dust + trail.
+  // Landing dust + squash.
   if (!wasGrounded && run.player.grounded) {
     SFX.land();
+    squashT = 0.1;
     burst(run.player.x + 12, run.player.grav === 1 ? run.player.y + 32 : run.player.y, 6, COL.player, 90, 0.35, 2);
+  }
+  // Near-miss: a saw sweeping within 30–70px of the player (outside the
+  // kill radius) without touching earns a whoosh + brief slow-mo — the
+  // "that was close" beat. Cooldown 1.2s so a patrolling saw can't
+  // strobe it. Presentation-side only; the sim never sees it.
+  if (!run.dead && !run.done) {
+    const pcx = run.player.x + 12, pcy = run.player.y + 16;
+    let closest = Infinity;
+    for (const s of run.saws) {
+      const d = Math.hypot(s.x - pcx, s.y - pcy);
+      if (d < closest) closest = d;
+    }
+    if (closest > 30 && closest < 70 && run.time - lastNearMissAt > 1.2) {
+      lastNearMissAt = run.time;
+      nearMisses++;
+      SFX.nearMiss();
+      doSlowMo(0.22);
+      addTrauma(FEEDBACK.nearMiss.trauma);
+      addPop(pcx, pcy - 26, 'close!', '#fda4af');
+    }
   }
   pushTrail(px + 12, py + 16, run.player.grav);
   if (run.done && run.won) completeLevel();
@@ -599,6 +742,7 @@ function render() {
     drawLevel(level, activeRun);
   }
   if (activeRun) drawRun(activeRun);
+  drawShockwaves();
   drawParticles();
   drawPops();
   // Death / exit flash.
@@ -746,9 +890,22 @@ function drawRun(activeRun) {
     ctx.fillRect(sx, sy, 24 * s, 32 * s);
   }
   // Player: cyan rounded body, core glow, gravity arrow.
+  // Squash & stretch: flip stretches along the travel axis, landing
+  // squashes — both decay to the exact rest scale (1, 1).
   const px = wx2sx(p.x), py = wy2sy(p.y);
   const pw = 24 * s, ph = 32 * s;
+  let sxScale = 1, syScale = 1;
+  if (stretchT > 0) {
+    const k = stretchT / 0.14;
+    syScale = 1 + 0.28 * k; sxScale = 1 - 0.15 * k;
+  } else if (squashT > 0) {
+    const k = squashT / 0.1;
+    syScale = 1 - 0.25 * k; sxScale = 1 + 0.2 * k;
+  }
   ctx.save();
+  ctx.translate(px + pw / 2, py + ph / 2);
+  ctx.scale(sxScale, syScale);
+  ctx.translate(-(px + pw / 2), -(py + ph / 2));
   ctx.shadowColor = COL.player; ctx.shadowBlur = 16;
   ctx.fillStyle = COL.player;
   const r = 6 * s;
@@ -839,6 +996,21 @@ window.__flux = {
   resume() { resumeGame(); },
   quitToMenu() { quitToMenu(); },
   setMuted(m) { setMuted(m); },
+  setFlash(on) { setFlash(on); },
+  // Feel state for tests: every value must return to its rest value
+  // (trauma 0, timeScale 1, flashT 0, zoomT 0, no shockwaves) once the
+  // game sits idle — an effect that leaks is a bug.
+  feel() {
+    return {
+      trauma, timeScale, hitStopT, slowMoT, flashT, zoomT,
+      stretchT, squashT, camX, camScale,
+      shockwaves: shockwaves.length,
+      particlesAlive: particles.reduce((n, p) => n + (p.alive ? 1 : 0), 0),
+      orbCombo, nearMisses,
+      flashOn: save.settings.flash !== false,
+      shake: save.settings.shake ?? 1,
+    };
+  },
   get save() { return JSON.parse(JSON.stringify(save)); },
 };
 function playerScreenPosFor(r) {
@@ -864,6 +1036,7 @@ function bindUI() {
   $('btn-mute-menu').addEventListener('click', () => setMuted(!muted));
   $('btn-mute-hud').addEventListener('click', () => setMuted(!muted));
   $('btn-mute-settings').addEventListener('click', () => setMuted(!muted));
+  $('btn-flash-settings').addEventListener('click', () => setFlash(save.settings.flash === false));
   $('btn-pause').addEventListener('click', () => pauseGame());
   const shakeInput = $('setting-shake'), shakeVal = $('setting-shake-val');
   if (shakeInput) {
@@ -894,6 +1067,7 @@ function bindUI() {
 // version text anywhere player-facing).
 bindUI();
 updateMuteLabels();
+updateFlashLabel();
 refreshMenuBest();
 selectedLevel = save.unlocked || 1;
 goMenu();

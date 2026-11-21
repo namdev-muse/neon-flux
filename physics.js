@@ -17,7 +17,7 @@
 // Deterministic: fixed-step simulation (DT = 1/60), every hazard
 // cycle derived from the run clock, so identical inputs give
 // identical results.
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const TILE = 40;
 export const ROWS = 14;
 export const DT = 1 / 60;
@@ -53,14 +53,19 @@ export const CRUSHER_PHASES = [
 ];
 export const CRUSHER_CYCLE = CRUSHER_PHASES.reduce((a, p) => a + p.dur, 0); // 2.32s
 
-// Feedback tiers (game-feel): every event fires its full bundle.
+// Feedback tiers (game-feel): every event fires its full bundle within
+// the same frame it is emitted — sound + visuals + shake + flash/pop,
+// 3+ layers per event. The layers lists are the spec; game.js implements
+// each one, and the smoke test asserts the spec holds.
 export const FEEDBACK = {
-  flip: { trauma: 0.12, hitStop: 0, layers: ['sound', 'whoosh', 'trail'] },
-  orb: { trauma: 0.08, hitStop: 0, layers: ['sound', 'spark', 'pop'] },
-  checkpoint: { trauma: 0.15, hitStop: 0, layers: ['sound', 'ring', 'flash'] },
-  death: { trauma: 0.9, hitStop: 0.12, layers: ['sound', 'burst', 'shake', 'flash', 'slowmo'] },
-  exit: { trauma: 0.3, hitStop: 0, layers: ['sound', 'fanfare', 'burst', 'flash'] },
-  crusherSlam: { trauma: 0.35, hitStop: 0, layers: ['sound', 'thud', 'shake'] },
+  flip: { trauma: 0.12, hitStop: 0, layers: ['sound', 'whoosh-ring', 'trail-burst', 'zoom-pulse', 'stretch'] },
+  orb: { trauma: 0.08, hitStop: 0, layers: ['sound', 'spark', 'pop', 'combo-pitch'] },
+  checkpoint: { trauma: 0.15, hitStop: 0, layers: ['sound', 'ring', 'flash', 'burst'] },
+  death: { trauma: 0.9, hitStop: 0.12, layers: ['sound', 'burst', 'shake', 'flash', 'slowmo', 'hitstop'] },
+  respawn: { trauma: 0.1, hitStop: 0, layers: ['sound', 'ring', 'flash'] },
+  exit: { trauma: 0.3, hitStop: 0, layers: ['sound', 'fanfare', 'burst', 'flash', 'ring'] },
+  crusherSlam: { trauma: 0.35, hitStop: 0, layers: ['sound', 'thud', 'shake', 'dust'] },
+  nearMiss: { trauma: 0.05, hitStop: 0, layers: ['sound', 'slowmo', 'pop'] },
 };
 export const FEEDBACK_TIERS = {
   small: { trauma: [0.1, 0.2], hitStop: 0 },
@@ -68,7 +73,7 @@ export const FEEDBACK_TIERS = {
   large: { trauma: [0.7, 1.0], hitStop: [0.1, 0.15] },
 };
 export const FEEDBACK_LAYERS = {
-  flip: 3, orb: 3, checkpoint: 3, death: 5, exit: 4, crusherSlam: 3,
+  flip: 5, orb: 4, checkpoint: 4, death: 6, respawn: 3, exit: 5, crusherSlam: 4, nearMiss: 3,
 };
 
 export function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -865,7 +870,7 @@ export function simulateRun(levelId, policyFactory, opts = {}) {
 
 // ---------------------------------------------------------------- save
 export function defaultSave() {
-  return { version: SAVE_VERSION, best: {}, unlocked: 1, settings: { muted: false, shake: 1 } };
+  return { version: SAVE_VERSION, best: {}, unlocked: 1, settings: { muted: false, shake: 1, flash: true } };
 }
 export function serializeSave(save) { return JSON.stringify(save); }
 export function parseSave(text) {
@@ -882,6 +887,7 @@ export function parseSave(text) {
     if (s.settings && typeof s.settings === 'object') {
       if (typeof s.settings.muted === 'boolean') out.settings.muted = s.settings.muted;
       if (typeof s.settings.shake === 'number') out.settings.shake = clamp(s.settings.shake, 0, 1);
+      if (typeof s.settings.flash === 'boolean') out.settings.flash = s.settings.flash;
     }
     return out;
   } catch { return defaultSave(); }

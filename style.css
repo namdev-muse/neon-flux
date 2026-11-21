@@ -156,6 +156,7 @@ html, body {
   margin-bottom: 16px; font-size: 15px;
 }
 .setting-row input[type="range"] { width: 180px; accent-color: var(--violet); }
+.setting-note { color: var(--dim); font-size: 13px; }
 .complete-best { color: var(--gold); font-weight: 800; font-size: 17px; min-height: 24px; margin: 0 0 12px; }
 .complete-stats {
   display: flex; flex-wrap: wrap; gap: 10px 22px; justify-content: center;
