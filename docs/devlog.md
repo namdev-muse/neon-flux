@@ -1,5 +1,14 @@
 # Neon Flux — devlog
 
+## v0.2.0 — M2 level craft (2026-11-22)
+
+- **12 hand-crafted levels** (was 6): Crosswind, Crusher Alley, The Weave, Sawmill, Thunder Row, Event Horizon join the first six. Each has its own identity: saw-gated flip arcs, crusher timing, rapid flip rhythm, vertical-saw floor runs, sparse-checkpoint crusher gauntlet, and a everything-combined finale.
+- **Anti-slop gaps closed (M1 carry-over):** L2 slow random bot 1/6 and L3 canonical random bot 1/6. L2's ceiling is now contiguous spikes with corridors only at the decision bot's landings (7, 30, 48) plus a forced flip-down to the exit gap; L3's ceiling gaps narrowed 5 cols → 3 cols at the decision bot's landings (16, 30, 41, 44). Multi-rate probe: 0 wins at any rate. The probe is now folded into `tests/bot.js` (`createRandomBotAtRate` in physics.js) — fast 0.1–0.6s, canonical 0.2–1.2s, slow 0.8–2.5s, 6 seeds each, every level.
+- **The level grammar that works** (learned the hard way — the first M2 draft failed 12 bot gates): long ceiling rides (7–9 cols, ~1s of not-flipping) so a masher flips during the ride and dies; 4-col floor gaps so the flip-up must be timed; one checkpoint per two beat-pairs; patches span [landing, flip-down + 1 col] (a spike 1 col past a flip-down kills the flipper by 1px — the kill rect is inset, but the margin is real); saws/crushers gate arcs as a bonus filter, never as the only defense.
+- **Crusher lessons:** a checkpoint must never sit on (or 1 col from) a crusher column — L8 v1 respawned the bot under 'C'@40 and looped 20+ deaths in 0.5s cycles. A crusher needs a safe waiting spot before its column and approach distance to time the crossing; the planner's `wait` is only 0.4s, so a crossing that needs a longer wait becomes a phase-alignment grind (L8 v1: 76 deaths). Fix: 'c'@32 removed (it forced suicidal early flip-downs), K@57 added near the exit crusher to shorten the retry cycle, floor gap widened 4 → 5 cols at the landing edge. Result: L8 decision bot 49.0s/12 deaths → 10.0s/2 deaths.
+- **L9 "The Weave" v1 was slop:** the canonical random bot cleared it — rapid beats at the masher's own rate. Rebuilt with 1 checkpoint, 3-col patches, long rides, irregular beat spacing. Now 9.3s/0 deaths for the decision bot, random dies x37.
+- Decision bot clears all 12 (L11 hardest: 35.3s/5 deaths; L4 18.0s/3 deaths). Random dies everywhere at every rate. Smoke 172/172.
+
 ## v0.1.0 — M1 core (2026-11-21/22)
 
 The first 2D game of the next loop: a neon gravity-flip action-platformer.
