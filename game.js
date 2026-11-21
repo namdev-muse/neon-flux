@@ -1,4 +1,4 @@
-// Neon Flux v0.1.0 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
+// Neon Flux v0.2.0 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
 // Presentation layer: rendering, input, screens, audio, game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns
 // everything the player sees and hears. No build step, no Three.js.
@@ -498,7 +498,7 @@ function refreshMenuBest() {
   const cleared = Object.keys(save.best).length;
   el.textContent = cleared > 0
     ? `${cleared} of ${LEVELS.length} levels cleared — keep flipping.`
-    : 'No runs yet — 6 levels of spikes, saws and crushers await.';
+    : `No runs yet — ${LEVELS.length} levels of spikes, saws and crushers await.`;
 }
 function refreshLevelSelect() {
   const grid = $('level-grid');

@@ -20,7 +20,9 @@ late and the floor spikes get you. Flips only work while standing on a surface
 - Death sends you back to your last checkpoint (orbs you collected stay
   collected). Score = orbs + time bonus + a flawless bonus for a deathless run.
   Best time is saved per level.
-- 6 dense hand-crafted levels in this release, each with its own identity.
+- 12 dense hand-crafted levels in this release, each with its own identity:
+  First Steps, Ceiling Run, Saw Alley, Crusher Row, The Gauntlet, Flux Core,
+  Crosswind, Crusher Alley, The Weave, Sawmill, Thunder Row, Event Horizon.
 
 ## Controls
 
@@ -45,7 +47,7 @@ menu with staggered pops and hover ticks.
 No auto-run, no assist, no "flip now" prompt — nothing plays for you. The
 level set is gated by bots: a bot that holds right and flips at random must
 die on every level, and a bot that flips with real timing decisions must be
-able to clear all six.
+able to clear all twelve.
 
 ## Run locally
 
