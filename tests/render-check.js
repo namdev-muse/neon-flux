@@ -1,4 +1,4 @@
-// Neon Flux v0.2.0 — headless browser render check.
+// Neon Flux v0.3.0 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless browser, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE demo (the attract-mode bot actually
@@ -114,8 +114,8 @@ try {
     throw new Error('game module did not initialise (window.__flux never appeared)');
   }
   const version = await page.evaluate(() => window.__flux.version);
-  if (version !== '0.2.0') throw new Error(`expected version 0.2.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.2.0');
+  if (version !== '0.3.0') throw new Error(`expected version 0.3.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.3.0');
 
   // Canvas exists and is on screen.
   const canvas = await page.evaluate(() => {
@@ -149,6 +149,23 @@ try {
   }
   console.log('render-check: level select — 12 cards, only level 1 unlocked on a fresh save');
   await page.click('#btn-levels-back');
+  await page.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden'), null, { timeout: 5000 });
+
+  // M3: the flashing toggle works — off means no flash ever fires.
+  await page.click('#btn-settings');
+  await page.waitForFunction(() => !document.getElementById('settings').classList.contains('hidden'), null, { timeout: 5000 });
+  const flashBefore = await page.evaluate(() => window.__flux.feel().flashOn);
+  if (flashBefore !== true) throw new Error(`flashing should default on, got ${flashBefore}`);
+  await page.click('#btn-flash-settings');
+  const flashOff = await page.evaluate(() => window.__flux.feel().flashOn);
+  if (flashOff !== false) throw new Error('flashing toggle did not turn flashing off');
+  const flashLabel = await page.textContent('#btn-flash-settings');
+  if (!flashLabel.includes('Off')) throw new Error(`flash toggle label wrong: ${flashLabel}`);
+  await page.click('#btn-flash-settings');
+  const flashOn = await page.evaluate(() => window.__flux.feel().flashOn);
+  if (flashOn !== true) throw new Error('flashing toggle did not turn flashing back on');
+  console.log('render-check: flashing toggle works (On -> Off -> On, label follows)');
+  await page.click('#btn-settings-back');
   await page.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden'), null, { timeout: 5000 });
 
   // The attract demo plays behind the menu: the demo player moves.
@@ -220,10 +237,62 @@ try {
   const flip0 = await page.evaluate(() => window.__flux.info());
   await page.keyboard.press('Space');
   await page.waitForFunction(() => window.__flux.info().playerWorld.grav === -1, null, { timeout: 5000 });
+  // M3: the flip fires its full bundle in the same frame — shockwave
+  // ring + camera zoom pulse + trauma, not just the gravity change.
+  const flipFeel = await page.evaluate(() => window.__flux.feel());
+  if (flipFeel.shockwaves < 1) throw new Error(`flip fired no shockwave ring (feel: ${JSON.stringify(flipFeel)})`);
+  if (!(flipFeel.zoomT > 0)) throw new Error(`flip fired no camera zoom pulse (feel: ${JSON.stringify(flipFeel)})`);
+  if (!(flipFeel.trauma > 0)) throw new Error(`flip fired no trauma (feel: ${JSON.stringify(flipFeel)})`);
+  console.log(`render-check: flip fires its bundle — shockwave ${flipFeel.shockwaves}, zoom pulse ${flipFeel.zoomT.toFixed(2)}, trauma ${flipFeel.trauma.toFixed(2)}`);
   const flip1 = await page.evaluate(() => window.__flux.info());
   await page.waitForFunction((y0) => window.__flux.info().player.y < y0 - 10, flip0.player.y, { timeout: 10000 });
   const flip2 = await page.evaluate(() => window.__flux.info());
   console.log(`render-check: Space flips gravity (grav ${flip0.playerWorld.grav} -> ${flip1.playerWorld.grav}) and the player rises on screen (y ${flip0.player.y.toFixed(0)} -> ${flip2.player.y.toFixed(0)})`);
+
+  // M3: rest state — poll until every effect has decayed to its exact
+  // rest value (no trauma, no slow-mo, no flash, no zoom, no rings, no
+  // squash/stretch). Polled, not a fixed wait: under SwiftShader the
+  // frame rate is low and a fixed 3s wall wait is not 3s of decay.
+  // The player stands on the ceiling near the start, clear of the
+  // ceiling spikes, so no new event fires while waiting.
+  await page.waitForFunction(() => {
+    const f = window.__flux.feel();
+    return f.trauma === 0 && f.timeScale === 1 && f.flashT === 0 && f.zoomT === 0
+      && f.shockwaves === 0 && f.stretchT <= 0 && f.squashT <= 0 && f.slowMoT === 0 && f.hitStopT === 0;
+  }, null, { timeout: 30000 });
+  console.log('render-check: feel rest state clean after idle (trauma 0, timeScale 1, no flash/zoom/rings)');
+
+  // M3: camera lookahead — while running right the player stays on
+  // screen (camera keeps up, neither lagging behind nor racing ahead).
+  // Wait until the player has actually advanced 200px in the world
+  // first: under SwiftShader frames are slow and a fixed wall-clock
+  // sample window can pass vacuously while the sim barely moves.
+  await page.keyboard.press('r');
+  await page.waitForFunction(() => {
+    const i = window.__flux.info();
+    return window.__flux.state.phase === 'playing' && i.playerWorld.grounded && i.playerWorld.grav === 1;
+  }, null, { timeout: 10000 });
+  const camStart = await page.evaluate(() => window.__flux.info().playerWorld.x);
+  const deaths0 = (await page.evaluate(() => window.__flux.info())).deaths;
+  await page.keyboard.down('ArrowRight');
+  try {
+    await page.waitForFunction(([x0, d0]) => {
+      const i = window.__flux.info();
+      return i.playerWorld.x > x0 + 200 && i.deaths === d0;
+    }, [camStart, deaths0], { timeout: 30000 });
+  } finally {
+    await page.keyboard.up('ArrowRight');
+  }
+  const camSamples = [];
+  for (let i = 0; i < 3; i++) {
+    const s = await page.evaluate(() => ({ x: window.__flux.info().player.x, d: window.__flux.info().deaths }));
+    if (s.d === deaths0) camSamples.push(s.x);
+    await page.waitForTimeout(400);
+  }
+  if (camSamples.length < 2) throw new Error(`too few clean camera samples (${camSamples.length}) — deaths during the run?`);
+  const outOfFrame = camSamples.filter((x) => x < 128 || x > 1152);
+  if (outOfFrame.length > 0) throw new Error(`camera lost the player while running right: samples ${camSamples.map((x) => x.toFixed(0)).join(',')}`);
+  console.log(`render-check: camera keeps the runner on screen (${camSamples.length} samples after +200px, x ${Math.min(...camSamples).toFixed(0)}–${Math.max(...camSamples).toFixed(0)})`);
 
   // Gameplay screenshot for the by-eye check.
   await page.screenshot({ timeout: 300000, path: path.join(SHOTS_DIR, 'gameplay-1280x720.png') });
@@ -323,7 +392,7 @@ try {
     throw new Error(`render-check failed with ${errors.length} console/page error(s)`);
   }
   if (navAwayArtifacts > 0) console.log(`render-check: ignored ${navAwayArtifacts} Firefox "Navigated away" driver artifacts`);
-  console.log('render-check: PASS — menu + live demo, screen-space movement + flip, death/respawn, autopilot clear + save, pause/resume/restart, zero console errors');
+  console.log('render-check: PASS — menu + live demo, flash toggle, flip bundle + rest state, camera lookahead, screen-space movement + flip, death/respawn, autopilot clear + save, pause/resume/restart, zero console errors');
 } catch (err) {
   console.error('render-check: FAIL —', err.message);
   if (errors.length > 0) {

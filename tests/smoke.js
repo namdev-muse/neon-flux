@@ -1,4 +1,4 @@
-// Neon Flux v0.2.0 — Node smoke tests for physics.js (no DOM, no Canvas).
+// Neon Flux v0.3.0 — Node smoke tests for physics.js (no DOM, no Canvas).
 // Covers level validity, flip/momentum physics, hazards, checkpoints,
 // scoring, saves, and the anti-slop gates on level 1 (the full 6-level
 // bot gate lives in tests/bot.js). Exit 0 when all pass.
@@ -19,9 +19,9 @@ function check(name, cond, extra) {
 }
 function approx(a, b, eps = 1e-6) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.2.0', VERSION === '0.2.0');
+check('physics version is 0.3.0', VERSION === '0.3.0');
 check('12 levels defined', LEVELS.length === 12);
-check('level ids are 1..6 in order', LEVELS.every((l, i) => l.id === i + 1));
+check('level ids are 1..12 in order', LEVELS.every((l, i) => l.id === i + 1));
 check('every level has a name, hint, par and accent', LEVELS.every((l) => l.name && l.hint && l.par > 0 && l.accent));
 check('level names are distinct', new Set(LEVELS.map((l) => l.name)).size === LEVELS.length);
 check('level accents are distinct', new Set(LEVELS.map((l) => l.accent)).size === LEVELS.length);
@@ -254,6 +254,38 @@ check('mulberry32 is deterministic', mulberry32(42)() === mulberry32(42)());
 check('clamp works', clamp(5, 0, 3) === 3 && clamp(-1, 0, 3) === 0 && clamp(2, 0, 3) === 2);
 check('every feedback event has layers', Object.values(FEEDBACK).every((f) => f.layers.length >= 3));
 check('feedback layer counts match the table', Object.entries(FEEDBACK_LAYERS).every(([k, n]) => FEEDBACK[k].layers.length === n));
+// M3: the feedback spec is complete and in-tier — every event type the
+// sim can emit has an entry, trauma stays in [0, 1], hit-stop in
+// [0, 0.15]s, and the death event is the large tier (0.7–1.0 trauma,
+// 0.10–0.15s stop) per the game-feel tiers.
+check('feedback covers respawn + nearMiss (game-side events)', !!FEEDBACK.respawn && !!FEEDBACK.nearMiss);
+check('all feedback trauma in [0, 1] and hit-stop in [0, 0.15]',
+  Object.values(FEEDBACK).every((f) => f.trauma >= 0 && f.trauma <= 1 && f.hitStop >= 0 && f.hitStop <= 0.15));
+check('death is the large tier', FEEDBACK.death.trauma >= 0.7 && FEEDBACK.death.trauma <= 1.0 && FEEDBACK.death.hitStop >= 0.1 && FEEDBACK.death.hitStop <= 0.15);
+check('medium events sit in the medium tier', FEEDBACK.crusherSlam.trauma >= 0.3 && FEEDBACK.crusherSlam.trauma <= 0.5 && FEEDBACK.exit.trauma >= 0.3 && FEEDBACK.exit.trauma <= 0.5);
+{
+  // Drive a decision bot through level 1 and collect every event type
+  // the sim actually emits — each must have a FEEDBACK bundle.
+  const run = createRun(1);
+  const bot = createDecisionBot();
+  const seen = new Set();
+  for (let i = 0; i < 60 * 120 && !run.done; i++) {
+    stepRun(run, bot.input(run, DT), DT);
+    for (const e of drainEvents(run)) seen.add(e.type);
+  }
+  check('decision-bot L1 run emits events the feedback table covers',
+    [...seen].every((t) => !!FEEDBACK[t]), `emitted: ${[...seen].join(',')}`);
+  check('decision-bot L1 run emits flip + orb + exit events',
+    seen.has('flip') && seen.has('orb') && seen.has('exit'), `emitted: ${[...seen].join(',')}`);
+}
+// M3: flashing toggle defaults on and round-trips through the save.
+check('default save has flashing on', defaultSave().settings.flash === true);
+{
+  const s = defaultSave();
+  s.settings.flash = false;
+  const round = parseSave(serializeSave(s));
+  check('flash-off survives a save round-trip', round.settings.flash === false);
+}
 
 // --- anti-slop gates on level 1 (full gate in tests/bot.js) ---
 {
