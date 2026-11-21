@@ -1,4 +1,4 @@
-// Neon Flux v0.3.0 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
+// Neon Flux v0.3.1 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
 // Presentation layer: rendering, input, screens, audio, game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns
 // everything the player sees and hears. No build step, no Three.js.
@@ -198,7 +198,8 @@ const HUD_H = 56;
 let camX = 0, camScale = 1, camScaleBase = 1, zoomT = 0, camSnap = true;
 function computeCamera(dt) {
   camScaleBase = (viewH - HUD_H) / (ROWS * TILE);
-  camScale = camScaleBase * (1 + 0.05 * zoomT);
+  // 7% zoom pulse, slow decay: the 5% pulse never registered in stills.
+  camScale = camScaleBase * (1 + 0.07 * zoomT);
   const viewWorldW = viewW / camScaleBase;
   // Follow the active run — the game run, or the attract demo in the menu.
   const active = run || demoRun;
@@ -249,7 +250,7 @@ function updateFeel(dt) {
   shakeX = (Math.random() * 2 - 1) * sh;
   shakeY = (Math.random() * 2 - 1) * sh;
   if (flashT > 0) flashT -= dt;
-  if (zoomT > 0) zoomT = Math.max(0, zoomT - dt * 3.5);
+  if (zoomT > 0) zoomT = Math.max(0, zoomT - dt * 2.5);
   if (stretchT > 0) stretchT = Math.max(0, stretchT - dt);
   if (squashT > 0) squashT = Math.max(0, squashT - dt);
 }
@@ -533,7 +534,9 @@ function handleEvents(events) {
       case 'flip':
         SFX.flip();
         burst(p.x + 12, p.y + 16, 10, COL.player, 160, 0.4, 2.5);
-        spawnShockwave(p.x + 12, p.y + 16, COL.player, 90, 0.45, 4);
+        // Big, slow ring: the 90px/0.45s ring never registered in
+        // playtest stills. 130px/0.6s reads in a still and in motion.
+        spawnShockwave(p.x + 12, p.y + 16, COL.player, 130, 0.6, 5);
         zoomT = 1; // camera zoom pulse (visual only)
         stretchT = 0.14; // stretch along the flip axis
         break;
@@ -889,6 +892,10 @@ function drawRun(activeRun) {
     ctx.fillStyle = `rgba(34,211,238,${(tr.life / 0.28 * 0.25).toFixed(3)})`;
     ctx.fillRect(sx, sy, 24 * s, 32 * s);
   }
+  // While dead (the death beat) the body is NOT drawn: it burst into
+  // particles on death, and a frozen upside-down body hanging on the
+  // ceiling reads as a broken respawn. The body returns at the respawn.
+  if (activeRun.dead) return;
   // Player: cyan rounded body, core glow, gravity arrow.
   // Squash & stretch: flip stretches along the travel axis, landing
   // squashes — both decay to the exact rest scale (1, 1).
