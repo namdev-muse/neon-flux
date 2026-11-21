@@ -104,7 +104,7 @@ export const LEVELS = [
     hint: 'Run right. SPACE flips gravity — but only while standing on a surface. Flip where the ceiling is clear.',
     rows: [
       '###########################################################',
-      '.........vvvvvvv*..vvvvvvvvvvv*..vvvvvvvvvvv*..vvvvvvv.....',
+      '.........vvvvvv.*..vvvvvvvvvvv*..vvvvvvvvvvv*..vvvvvvv.....',
       '...........................................................',
       '...........................................................',
       '...........................................................',
