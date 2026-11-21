@@ -1,10 +1,10 @@
-// Neon Flux v0.1.0 — headless browser render check.
+// Neon Flux v0.2.0 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless browser, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE demo (the attract-mode bot actually
 //     plays level 1 behind the menu — the demo player moves), with no
 //     version/engine text anywhere the player can see, one clear primary
-//     Play action, and 6 level cards
+//     Play action, and 12 level cards
 //   - Play starts level 1 with the HUD; movement is asserted in SCREEN
 //     space (right moves right on screen, left moves left — the Drift M2
 //     lesson), and the flip is asserted in screen space too (Space flips
@@ -114,8 +114,8 @@ try {
     throw new Error('game module did not initialise (window.__flux never appeared)');
   }
   const version = await page.evaluate(() => window.__flux.version);
-  if (version !== '0.1.0') throw new Error(`expected version 0.1.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.1.0');
+  if (version !== '0.2.0') throw new Error(`expected version 0.2.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.2.0');
 
   // Canvas exists and is on screen.
   const canvas = await page.evaluate(() => {
@@ -129,25 +129,25 @@ try {
   // player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON') || !menuText.includes('FLUX')) throw new Error('menu title missing');
-  if (menuText.includes('0.1.0') || menuText.includes('v0.1') || menuText.includes('Three.js')) {
+  if (/\bv?\d+\.\d+\.\d+\b/.test(menuText) || menuText.includes('Three.js')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
   if (!playClass || !playClass.includes('primary')) throw new Error('Play is not the primary action');
   console.log('render-check: menu renders — no version text, Play primary');
 
-  // Level select: 6 level cards, only level 1 unlocked on a fresh save.
+  // Level select: 12 level cards, only level 1 unlocked on a fresh save.
   await page.click('#btn-levels');
   await page.waitForFunction(() => !document.getElementById('levels').classList.contains('hidden'), null, { timeout: 5000 });
   const cardCount = await page.locator('#level-grid .level-card').count();
-  if (cardCount !== 6) throw new Error(`expected 6 level cards, got ${cardCount}`);
+  if (cardCount !== 12) throw new Error(`expected 12 level cards, got ${cardCount}`);
   const lockedCards = await page.locator('#level-grid .level-card.locked').count();
-  if (lockedCards !== 5) throw new Error(`expected 5 locked cards on a fresh save, got ${lockedCards}`);
+  if (lockedCards !== 11) throw new Error(`expected 11 locked cards on a fresh save, got ${lockedCards}`);
   const levels = await page.evaluate(() => window.__flux.levels());
-  if (levels.length !== 6 || levels[0].name !== 'First Steps' || levels[5].name !== 'Flux Core') {
+  if (levels.length !== 12 || levels[0].name !== 'First Steps' || levels[11].name !== 'Event Horizon') {
     throw new Error(`level list wrong: ${JSON.stringify(levels.map((l) => l.name))}`);
   }
-  console.log('render-check: level select — 6 cards, only level 1 unlocked on a fresh save');
+  console.log('render-check: level select — 12 cards, only level 1 unlocked on a fresh save');
   await page.click('#btn-levels-back');
   await page.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden'), null, { timeout: 5000 });
 

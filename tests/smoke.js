@@ -1,4 +1,4 @@
-// Neon Flux v0.1.0 — Node smoke tests for physics.js (no DOM, no Canvas).
+// Neon Flux v0.2.0 — Node smoke tests for physics.js (no DOM, no Canvas).
 // Covers level validity, flip/momentum physics, hazards, checkpoints,
 // scoring, saves, and the anti-slop gates on level 1 (the full 6-level
 // bot gate lives in tests/bot.js). Exit 0 when all pass.
@@ -19,12 +19,12 @@ function check(name, cond, extra) {
 }
 function approx(a, b, eps = 1e-6) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.1.0', VERSION === '0.1.0');
-check('6 levels defined', LEVELS.length === 6);
+check('physics version is 0.2.0', VERSION === '0.2.0');
+check('12 levels defined', LEVELS.length === 12);
 check('level ids are 1..6 in order', LEVELS.every((l, i) => l.id === i + 1));
 check('every level has a name, hint, par and accent', LEVELS.every((l) => l.name && l.hint && l.par > 0 && l.accent));
-check('level names are distinct', new Set(LEVELS.map((l) => l.name)).size === 6);
-check('level accents are distinct', new Set(LEVELS.map((l) => l.accent)).size === 6);
+check('level names are distinct', new Set(LEVELS.map((l) => l.name)).size === LEVELS.length);
+check('level accents are distinct', new Set(LEVELS.map((l) => l.accent)).size === LEVELS.length);
 check('levelById finds level 3', levelById(3) && levelById(3).name === 'Saw Alley');
 check('levelById returns null for 99', levelById(99) === null);
 
