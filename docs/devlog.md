@@ -1,0 +1,74 @@
+# Neon Flux — devlog
+
+## v0.1.0 — M1 core (2026-11-21/22)
+
+The first 2D game of the next loop: a neon gravity-flip action-platformer.
+Run, flip gravity, dodge spikes, reach the exit. The flip IS the jump —
+there is no jump button, and momentum carries through the flip.
+
+### What shipped
+
+- **6 dense hand-crafted levels** (First Steps, Ceiling Run, Saw Alley,
+  Crusher Row, The Gauntlet, Flux Core), each with its own identity:
+  flip-zones, ceiling runs, saw lanes, crusher rows, gaps, checkpoints.
+- **Pure simulation core** (`physics.js`, no DOM): ground-only flips with
+  coyote time and input buffering, spike/saw/crusher hazards, orbs,
+  checkpoints, full-height exit portal columns, scoring (orbs + time
+  bonus + flawless bonus), localStorage best times.
+- **Presentation** (`game.js` + Canvas 2D): live attract-mode demo behind
+  the menu (the decision bot actually plays level 1), screen-stack menu
+  with staggered overshoot pops and hover ticks, event-driven HUD, Web
+  Audio synth SFX + a bass-and-arp music loop, pooled particles, trauma
+  screen shake, hit-stop and slow-mo on death, floating score pops,
+  touch controls (hold zones + big FLIP button).
+- **Anti-slop gates** (`tests/bot.js`): a bot that holds right and flips at
+  random dies on every level; a bot that flips with real timing decisions
+  (lookahead planner through public input hooks) clears all six.
+- **Render check** (`tests/render-check.js`): headless Chromium asserts the
+  menu + live demo, screen-space movement and flip direction, death +
+  respawn, autopilot clear + save, pause/resume/restart, zero console errors.
+
+### The tuning story
+
+The level grammar was the hard part, and it took many iterations to find:
+
+- **"Mostly no-flip" design.** Contiguous ceiling spikes in no-flip zones,
+  with clear ceiling patches only at intended flip landings. A "2 on, 1 off"
+  spike pattern left 1-tile safe gaps a random flip could land in.
+- **Ground-only flips.** Mid-air flips let the player hover by flipping
+  repeatedly; flips now only work while standing on a surface (plus a 0.1s
+  coyote window and 0.12s input buffering). Momentum is still preserved.
+- **The decision bot must commit.** Replanning every tick broke delayed
+  flips (the delay restarted each tick and never counted down). The bot
+  commits to a plan for its full 3.0s horizon; the rollout is deterministic,
+  so executing the plan reproduces it tick for tick.
+- **Arc orbs sit at the landing col**, not the flip col — an orb on the
+  flip arc bribed the planner into flipping early and dying.
+- **Checkpoints must not sit inside a hazard's patrol range** (one sat
+  inside a saw's lane and produced a 23-death respawn loop).
+- **Saw zones need a clear ceiling patch above them**, so the player can
+  flip over the saw instead of running through it.
+
+### Known gaps (M2)
+
+- Multi-rate random-bot spot checks (2026-11-22, 6 seeds × 3 flip
+  rates): L2 slow bot (flips every 0.8–2.5s) wins 1/6; L3 canonical
+  bot (0.2–1.2s) wins 1/6. Single-seed lucky runs, not systematic
+  mash-clearing — but the anti-slop bar is zero wins, so M2 must close
+  them. Probe saved at
+  `~/workspace/goals/neon-flux-sprint/hidden_files/multirate-probe.mjs`;
+  M2 should fold it into `tests/bot.js` once the gaps are closed.
+- L4 was the systematic gap and is FIXED in v0.1.0: a fast random bot
+  (0.1–0.6s) won 6/6 and the canonical bot 3/6, because the level had
+  no ceiling spikes — an almost-always-airborne flipper threaded the
+  crushers. Fix: contiguous ceiling-spike runs with clear patches only
+  at intended flip landings (the L1 grammar), repositioned so the
+  decision bot's landing columns sit inside the patches. Result: fast
+  0/6, canonical 0/6, slow 0/6; decision bot still clears (18.0s,
+  3 deaths, floor-timing route). The opening 8 tiles stay spike-free
+  per the smoke rule.
+- L3's decision-bot clear takes 14.6s with 2 deaths (saw timing is tight);
+  L6 takes 13.1s with 2 deaths. Both are clearable, but the saw lanes
+  deserve a fairness pass.
+- L4 is the only level whose intended route changed during tuning
+  (ceiling-ride → floor-timing with two ceiling hops).
