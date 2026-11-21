@@ -1,5 +1,16 @@
 # Neon Flux — devlog
 
+## v0.3.0 — M3 feel & juice (2026-11-22)
+
+- **Camera:** follow now leans into the run — velocity lookahead (up to 140px) plus smooth gliding toward the target instead of snapping, so the view reads as a glide and the player never leaves the frame mid-run. A flip fires a short zoom pulse (visual only; the rig never moves colliders).
+- **Flip whoosh:** every flip now fires its full bundle in the same frame — whoosh SFX, an expanding shockwave ring, a particle burst, the zoom pulse, and stretch along the flip axis. Landings squash. The FEEDBACK table in physics.js is the spec (3–6 layers per event) and the smoke test asserts the spec: every event type the sim emits has a bundle, trauma in [0, 1], hit-stop in [0, 0.15]s, death the large tier.
+- **Near-miss:** a saw sweeping within 30–70px without touching earns a whoosh + brief slow-mo + a "close!" pop (1.2s cooldown so a patrolling saw can't strobe it). Presentation-side only — the sim never sees it.
+- **Orb combo:** consecutive orbs within 1.5s climb a pitch ladder and show `+100 ×N`.
+- **Crusher slam** now kicks up dust at the impact point; **respawn** gets a soft chime + ring + flash of its own instead of a silent pop-in.
+- **Music deepened:** Am–F–C–G pad chords (detuned triangles, slow attack) under the bass + arp, and hat ticks on the offbeats while playing a level.
+- **Accessibility:** a Flashing on/off toggle joins the shake slider in Settings (flash-off clears any flash already on screen). Rest-state guarantee: after sitting idle, trauma, timeScale, flash, zoom, rings and squash/stretch all return to their exact rest values — asserted in the render check via `__flux.feel()`.
+- Smoke 180/180, bot gates unchanged (decision clears all 12, random dies everywhere), render check PASS.
+
 ## v0.2.0 — M2 level craft (2026-11-22)
 
 - **12 hand-crafted levels** (was 6): Crosswind, Crusher Alley, The Weave, Sawmill, Thunder Row, Event Horizon join the first six. Each has its own identity: saw-gated flip arcs, crusher timing, rapid flip rhythm, vertical-saw floor runs, sparse-checkpoint crusher gauntlet, and a everything-combined finale.
