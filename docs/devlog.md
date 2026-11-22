@@ -1,5 +1,31 @@
 # Neon Flux — devlog
 
+## v0.3.2 — M3 playtest fix-forward #2 (2026-11-22)
+
+- **Live playtest NO-GO triage (v0.3.1):** the second tap-only playtest
+  confirmed the death beat is mostly fixed (no frozen upside-down body;
+  every observed death respawned quickly, upright, on the floor) but
+  flagged three things: a solid cyan body-sized rectangle in the first
+  frame of every death, no visible shockwave ring on any flip, and no
+  visible zoom pulse.
+- **The rectangle was the trail, not the body.** The trail is drawn
+  before the `activeRun.dead` guard, and under slow tap-only movement
+  26 trail rects pile up at one spot and composite to near-solid cyan.
+  Fix: the trail is cleared on death. The death burst is also thicker
+  now (48 cyan / 24 pink particles, was 34/16) so the burst reads
+  instead of a rectangle.
+- **Ring and zoom were present but decayed before the stills.** The ring
+  used linear alpha falloff (0.24 at 0.44s into a 0.6s life) and the zoom
+  pulse lasted 0.4s, so a capture 0.44s after a flip showed neither —
+  expected, not absent (the render check had asserted zoomT 0.77–0.88
+  in-frame). Fix: ring alpha now uses sqrt falloff (0.52 at t=0.73),
+  thicker line + glow, life 0.6s → 0.7s; zoom decay 2.5/s → 1.2/s
+  (~0.83s pulse). A flip-stills probe (pre-flip vs ~0.25s post-flip)
+  now shows the ring unmistakably in the still — large cyan outer +
+  inner echo rings at the flip origin, player stretched above it.
+- Smoke 180/180, bot gates unchanged, render check PASS, flip-stills
+  probe PASS by eye.
+
 ## v0.3.1 — M3 playtest fix-forward (2026-11-22)
 
 - **Live playtest NO-GO triage (v0.3.0):** the tap-only playtest could not
