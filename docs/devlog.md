@@ -1,5 +1,36 @@
 # Neon Flux — devlog
 
+## v0.3.3 — M3 playtest fix-forward #3 (2026-11-22)
+
+- **Live playtest NO-GO triage (v0.3.2):** the third tap-only playtest
+  still reported all three defects — death-frame rectangle, no ring, no
+  zoom. Instrumental triage (headless Chromium, in-page timing +
+  clipped screenshots read by eye) split the verdict:
+- **Death rectangle: REAL BUG, root-caused.** The v0.3.2 fix cleared
+  the trail once in the death handler, but `pushTrail` runs every tick
+  ungated — the sim keeps stepping through the death beat with the
+  player frozen at the death point, so the trail refilled within 0.28s
+  and 17+ player-sized rects stacked into a solid body. My own
+  screenshots prove it: +0.25s a translucent block at the death point,
+  +0.9s a solid body-sized rectangle over the first spike. Fix: the
+  push is now gated on `!run.dead && !run.done`. The render check now
+  asserts the trail reads 0 during the death beat.
+- **Ring/zoom: MEASUREMENT ARTIFACT, plus one real pause bug.** In-page
+  sampling right after a real flip shows the bundle is there (shockwave
+  1, zoomT 1.0 decaying to 0.78 over 180ms, grav flips) — the live
+  playtester's screenshots arrive >0.7s after the flip (ring life) and
+  >0.83s after (zoom pulse), and the player had already landed by the
+  capture. BUT the Space-then-Pause trick the playtester used to freeze
+  a frame could never work: `frame()` ran the feel/particle/shockwave
+  updates on wall time even while paused, so the ring decayed behind
+  the pause menu. Fix: pause now freezes everything — feel, particles,
+  pops, shockwaves, trail, camera (shake offsets zeroed so the backdrop
+  sits still). The render check now asserts the bundle is bit-identical
+  after 1.5s paused. The ring/zoom lifetimes were NOT lengthened: they
+  read in motion for a human player; stretching them for a slow
+  screenshot tool would be designing for the tool, not the player.
+- Smoke 180/180, bot gates unchanged, render check PASS.
+
 ## v0.3.2 — M3 playtest fix-forward #2 (2026-11-22)
 
 - **Live playtest NO-GO triage (v0.3.1):** the second tap-only playtest
