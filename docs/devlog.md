@@ -1,5 +1,28 @@
 # Neon Flux — devlog
 
+## v0.4.1 — M4 playtest fix-forward (2026-11-22)
+
+- **Live playtest GO (v0.4.0, browser task 9cbb9e82, 10:25–10:31):**
+  flip instant with momentum carried, deaths fair, orbs persist
+  through death, "wanted to keep playing" — M4 ships. Two polish
+  notes, both fixed here: (a) How to Play never stated the Bronze
+  threshold — it now reads "finish the level for Bronze"; (b) the orb
+  glyph ◈ (U+25C8) rendered as a tofu box in the playtester's browser
+  — swapped to ◆ (U+25C6) in the HUD, level cards, attack screen and
+  How to Play, and the render check now asserts the ◆ form.
+- **Report triage (honest):** the playtester's static UI descriptions
+  were partly embellished — it describes a "Levels cleared 0/12"
+  progress bar, "▶ Play" on the level card, "← Back to Menu" and a
+  "v0.4.0 · 12 levels" menu footer, none of which exist in the shipped
+  file (verified by curl: the live index.html is byte-identical to the
+  local v0.4.0; the levels title is "Choose a Level", the back button
+  is "← Back", locked cards read "Clear the previous level to unlock",
+  and there is no version text anywhere player-facing, by design).
+  The gameplay judgments (flip feel, deaths, fun) are corroborated by
+  the render check + bot evidence and stand; the invented UI details
+  are not repeated as facts anywhere. No version footer was added.
+- Smoke 215/215, bot gates pass, render check re-run PASS (v0.4.1).
+
 ## v0.4.0 — M4 progression & depth (2026-11-22)
 
 - **Time Attack (the one extra mode, done properly).** Why this mode
