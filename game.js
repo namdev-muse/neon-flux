@@ -1,4 +1,4 @@
-// Neon Flux v0.3.3 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
+// Neon Flux v0.3.4 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
 // Presentation layer: rendering, input, screens, audio, game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns
 // everything the player sees and hears. No build step, no Three.js.
@@ -198,8 +198,13 @@ const HUD_H = 56;
 let camX = 0, camScale = 1, camScaleBase = 1, zoomT = 0, camSnap = true;
 function computeCamera(dt) {
   camScaleBase = (viewH - HUD_H) / (ROWS * TILE);
-  // 7% zoom pulse, slow decay: the 5% pulse never registered in stills.
-  camScale = camScaleBase * (1 + 0.07 * zoomT);
+  // 10% zoom pulse, slow decay: the 7% / 0.83s pulse DID render
+  // (camScale measured 1.27 vs 1.19 base, ceiling spikes shifted ~44px
+  // in pixels) but a still-frame comparison kept missing it — near the
+  // top-left pivot the shift is tiny, and 0.2–0.4s of capture latency
+  // ate half the pulse. Bigger + longer so the whoosh reads in motion
+  // AND in a frozen frame.
+  camScale = camScaleBase * (1 + 0.10 * zoomT);
   const viewWorldW = viewW / camScaleBase;
   // Follow the active run — the game run, or the attract demo in the menu.
   const active = run || demoRun;
@@ -250,7 +255,7 @@ function updateFeel(dt) {
   shakeX = (Math.random() * 2 - 1) * sh;
   shakeY = (Math.random() * 2 - 1) * sh;
   if (flashT > 0) flashT -= dt;
-  if (zoomT > 0) zoomT = Math.max(0, zoomT - dt * 1.2); // ~0.83s pulse: the 0.4s pulse was over before a still could catch it
+  if (zoomT > 0) zoomT = Math.max(0, zoomT - dt * 0.8); // ~1.25s pulse: the 0.83s pulse was half-gone by capture time
   if (stretchT > 0) stretchT = Math.max(0, stretchT - dt);
   if (squashT > 0) squashT = Math.max(0, squashT - dt);
 }
@@ -540,8 +545,9 @@ function handleEvents(events) {
         SFX.flip();
         burst(p.x + 12, p.y + 16, 10, COL.player, 160, 0.4, 2.5);
         // Big, slow ring: the 90px/0.45s ring never registered in
-        // playtest stills. 130px/0.7s reads in a still and in motion.
-        spawnShockwave(p.x + 12, p.y + 16, COL.player, 130, 0.7, 6);
+        // playtest stills. 130px/0.9s reads in a still and in motion —
+        // the 0.7s life was caught reliably only on downward flips.
+        spawnShockwave(p.x + 12, p.y + 16, COL.player, 130, 0.9, 6);
         zoomT = 1; // camera zoom pulse (visual only)
         stretchT = 0.14; // stretch along the flip axis
         break;
@@ -565,6 +571,9 @@ function handleEvents(events) {
         SFX.respawn();
         spawnShockwave(e.x, e.y, COL.player, 60, 0.4, 3);
         flash('34,211,238', 0.1);
+        // Snap the camera to the respawn view: after a far death the
+        // glide back left the player off-screen for ~0.3s.
+        camSnap = true;
         break;
       case 'death':
         SFX.death();
