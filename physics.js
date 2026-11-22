@@ -17,7 +17,7 @@
 // Deterministic: fixed-step simulation (DT = 1/60), every hazard
 // cycle derived from the run clock, so identical inputs give
 // identical results.
-export const VERSION = '0.3.2';
+export const VERSION = '0.3.3';
 export const TILE = 40;
 export const ROWS = 14;
 export const DT = 1 / 60;

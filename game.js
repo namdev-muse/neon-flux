@@ -1,4 +1,4 @@
-// Neon Flux v0.3.2 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
+// Neon Flux v0.3.3 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
 // Presentation layer: rendering, input, screens, audio, game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns
 // everything the player sees and hears. No build step, no Three.js.
@@ -659,7 +659,13 @@ function frame(now) {
   const rawDt = Math.min(0.1, (now - lastTime) / 1000 || 0.016);
   lastTime = now;
   fpsEma = lerp(fpsEma, 1 / Math.max(rawDt, 1e-4), 0.05);
-  updateFeel(rawDt);
+  // Pause freezes EVERYTHING (sim + juice). The sim already stops in
+  // stepGame, but the feel/particle/shockwave updates ran on wall time,
+  // so a ring fired just before pausing decayed away behind the pause
+  // menu — and Space-then-Pause could never freeze it for a still frame.
+  // (Shake offsets are zeroed while paused so the backdrop sits still.)
+  if (phase !== 'pause') updateFeel(rawDt);
+  else { shakeX = 0; shakeY = 0; }
   const dt = rawDt * timeScale;
   if (hitStopT > 0) { render(); return; } // frozen: render, don't step
   accumulator += dt;
@@ -669,11 +675,13 @@ function frame(now) {
     stepGame(DT);
   }
   if (steps === 5) accumulator = 0; // spiral-of-death guard
-  updateParticles(rawDt);
-  updatePops(rawDt);
-  updateShockwaves(rawDt);
-  updateTrail(rawDt);
-  computeCamera(rawDt);
+  if (phase !== 'pause') {
+    updateParticles(rawDt);
+    updatePops(rawDt);
+    updateShockwaves(rawDt);
+    updateTrail(rawDt);
+    computeCamera(rawDt);
+  }
   render();
 }
 function stepGame(dt) {
@@ -721,7 +729,12 @@ function stepGame(dt) {
       addPop(pcx, pcy - 26, 'close!', '#fda4af');
     }
   }
-  pushTrail(px + 12, py + 16, run.player.grav);
+  // No trail while dead: the sim keeps stepping through the death beat
+  // with the player frozen at the death point, and an ungated push
+  // refilled the trail there — 26 player-sized rects stacking into a
+  // solid body that reads as a frozen corpse (v0.3.2 live playtest).
+  // The death handler clears the trail once; the push must not refill it.
+  if (!run.dead && !run.done) pushTrail(px + 12, py + 16, run.player.grav);
   if (run.done && run.won) completeLevel();
   updateHUD();
 }
@@ -1020,6 +1033,7 @@ window.__flux = {
       trauma, timeScale, hitStopT, slowMoT, flashT, zoomT,
       stretchT, squashT, camX, camScale,
       shockwaves: shockwaves.length,
+      trail: trail.length,
       particlesAlive: particles.reduce((n, p) => n + (p.alive ? 1 : 0), 0),
       orbCombo, nearMisses,
       flashOn: save.settings.flash !== false,
