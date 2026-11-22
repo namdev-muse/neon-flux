@@ -1,4 +1,4 @@
-// Neon Flux v0.3.3 — headless browser render check.
+// Neon Flux v0.3.4 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless browser, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE demo (the attract-mode bot actually
@@ -114,8 +114,8 @@ try {
     throw new Error('game module did not initialise (window.__flux never appeared)');
   }
   const version = await page.evaluate(() => window.__flux.version);
-  if (version !== '0.3.3') throw new Error(`expected version 0.3.3, got ${version}`);
-  console.log('render-check: game module initialised, version 0.3.3');
+  if (version !== '0.3.4') throw new Error(`expected version 0.3.4, got ${version}`);
+  console.log('render-check: game module initialised, version 0.3.4');
 
   // Canvas exists and is on screen.
   const canvas = await page.evaluate(() => {
@@ -235,6 +235,11 @@ try {
     return window.__flux.state.phase === 'playing' && i.playerWorld.grounded && i.playerWorld.grav === 1;
   }, null, { timeout: 10000 });
   const flip0 = await page.evaluate(() => window.__flux.info());
+  // v0.3.4: the zoom must reach the SCREEN, not just the feel state —
+  // read the settled camScale first, then require the flip to push it
+  // up by >5%. (v0.3.3 measured camScale 1.27 vs 1.19 base in a probe,
+  // but the render check only ever asserted zoomT, a state number.)
+  const settleFeel = await page.evaluate(() => window.__flux.feel());
   await page.keyboard.press('Space');
   await page.waitForFunction(() => window.__flux.info().playerWorld.grav === -1, null, { timeout: 5000 });
   // M3: the flip fires its full bundle in the same frame — shockwave
@@ -242,8 +247,9 @@ try {
   const flipFeel = await page.evaluate(() => window.__flux.feel());
   if (flipFeel.shockwaves < 1) throw new Error(`flip fired no shockwave ring (feel: ${JSON.stringify(flipFeel)})`);
   if (!(flipFeel.zoomT > 0)) throw new Error(`flip fired no camera zoom pulse (feel: ${JSON.stringify(flipFeel)})`);
+  if (!(flipFeel.camScale > settleFeel.camScale * 1.05)) throw new Error(`zoom pulse never reached the screen (camScale ${settleFeel.camScale.toFixed(3)} -> ${flipFeel.camScale.toFixed(3)}, need >5%)`);
   if (!(flipFeel.trauma > 0)) throw new Error(`flip fired no trauma (feel: ${JSON.stringify(flipFeel)})`);
-  console.log(`render-check: flip fires its bundle — shockwave ${flipFeel.shockwaves}, zoom pulse ${flipFeel.zoomT.toFixed(2)}, trauma ${flipFeel.trauma.toFixed(2)}`);
+  console.log(`render-check: flip fires its bundle — shockwave ${flipFeel.shockwaves}, zoom pulse ${flipFeel.zoomT.toFixed(2)} (camScale ${settleFeel.camScale.toFixed(3)} -> ${flipFeel.camScale.toFixed(3)}), trauma ${flipFeel.trauma.toFixed(2)}`);
 
   // v0.3.3: pause freezes the juice. Flip, pause as soon as the flip
   // lands, then check the bundle is BIT-IDENTICAL after 1.5s of wall
