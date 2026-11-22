@@ -1,4 +1,4 @@
-// Neon Flux v0.3.2 — Node smoke tests for physics.js (no DOM, no Canvas).
+// Neon Flux v0.3.3 — Node smoke tests for physics.js (no DOM, no Canvas).
 // Covers level validity, flip/momentum physics, hazards, checkpoints,
 // scoring, saves, and the anti-slop gates on level 1 (the full 6-level
 // bot gate lives in tests/bot.js). Exit 0 when all pass.
@@ -19,7 +19,7 @@ function check(name, cond, extra) {
 }
 function approx(a, b, eps = 1e-6) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.3.2', VERSION === '0.3.2');
+check('physics version is 0.3.3', VERSION === '0.3.3');
 check('12 levels defined', LEVELS.length === 12);
 check('level ids are 1..12 in order', LEVELS.every((l, i) => l.id === i + 1));
 check('every level has a name, hint, par and accent', LEVELS.every((l) => l.name && l.hint && l.par > 0 && l.accent));

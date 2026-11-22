@@ -1,4 +1,4 @@
-// Neon Flux v0.3.2 — headless browser render check.
+// Neon Flux v0.3.3 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless browser, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE demo (the attract-mode bot actually
@@ -114,8 +114,8 @@ try {
     throw new Error('game module did not initialise (window.__flux never appeared)');
   }
   const version = await page.evaluate(() => window.__flux.version);
-  if (version !== '0.3.2') throw new Error(`expected version 0.3.2, got ${version}`);
-  console.log('render-check: game module initialised, version 0.3.2');
+  if (version !== '0.3.3') throw new Error(`expected version 0.3.3, got ${version}`);
+  console.log('render-check: game module initialised, version 0.3.3');
 
   // Canvas exists and is on screen.
   const canvas = await page.evaluate(() => {
@@ -244,6 +244,31 @@ try {
   if (!(flipFeel.zoomT > 0)) throw new Error(`flip fired no camera zoom pulse (feel: ${JSON.stringify(flipFeel)})`);
   if (!(flipFeel.trauma > 0)) throw new Error(`flip fired no trauma (feel: ${JSON.stringify(flipFeel)})`);
   console.log(`render-check: flip fires its bundle — shockwave ${flipFeel.shockwaves}, zoom pulse ${flipFeel.zoomT.toFixed(2)}, trauma ${flipFeel.trauma.toFixed(2)}`);
+
+  // v0.3.3: pause freezes the juice. Flip, pause as soon as the flip
+  // lands, then check the bundle is BIT-IDENTICAL after 1.5s of wall
+  // time paused (and non-zero at pause — a dead flip would pass
+  // vacuously). Before the fix, updateShockwaves/updateFeel ran on
+  // wall time while paused, so a ring fired just before pausing
+  // decayed away behind the pause menu and Space-then-Pause could
+  // never freeze a flip for a still frame.
+  await page.keyboard.press('r');
+  await page.waitForFunction(() => {
+    const i = window.__flux.info();
+    return window.__flux.state.phase === 'playing' && i.playerWorld.grounded && i.playerWorld.grav === 1;
+  }, null, { timeout: 10000 });
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__flux.info().playerWorld.grav === -1, null, { timeout: 5000 });
+  await page.evaluate(() => window.__flux.pause());
+  await page.waitForFunction(() => window.__flux.state.phase === 'pause', null, { timeout: 5000 });
+  const pausedFeel0 = await page.evaluate(() => window.__flux.feel());
+  await page.waitForTimeout(1500);
+  const pausedFeel1 = await page.evaluate(() => window.__flux.feel());
+  if (pausedFeel0.shockwaves < 1 || !(pausedFeel0.zoomT > 0)) throw new Error(`flip bundle already gone at pause time (feel: ${JSON.stringify(pausedFeel0)}) — the check raced the 0.7s ring life`);
+  if (pausedFeel1.shockwaves !== pausedFeel0.shockwaves || pausedFeel1.zoomT !== pausedFeel0.zoomT) throw new Error(`pause let the flip bundle decay (shockwaves ${pausedFeel0.shockwaves} -> ${pausedFeel1.shockwaves}, zoomT ${pausedFeel0.zoomT.toFixed(2)} -> ${pausedFeel1.zoomT.toFixed(2)})`);
+  console.log(`render-check: pause freezes the flip bundle (shockwave ${pausedFeel1.shockwaves}, zoom ${pausedFeel1.zoomT.toFixed(2)} after 1.5s paused)`);
+  await page.evaluate(() => window.__flux.resume());
+  await page.waitForFunction(() => window.__flux.state.phase === 'playing', null, { timeout: 5000 });
   const flip1 = await page.evaluate(() => window.__flux.info());
   await page.waitForFunction((y0) => window.__flux.info().player.y < y0 - 10, flip0.player.y, { timeout: 10000 });
   const flip2 = await page.evaluate(() => window.__flux.info());
@@ -312,6 +337,22 @@ try {
     await page.keyboard.up('ArrowRight');
   }
   if (!died) throw new Error('holding right with no flips did not die — the level may be too easy');
+  // v0.3.3: no trail while dead. Poll during the ~0.9s death beat: the
+  // trail must read 0 at the death point. Before the fix the per-tick
+  // push refilled it within 0.28s, stacking into a solid body-sized
+  // rectangle through the whole beat (the v0.3.2 live-playtest finding).
+  const deadTrail = await page.evaluate(() => new Promise((resolve) => {
+    const iv = setInterval(() => {
+      const f = window.__flux.feel();
+      const i = window.__flux.info();
+      if (f.trail === 0 && i.deaths >= 1 && i.playerWorld.x > 400) { clearInterval(iv); resolve('empty'); }
+      else if (i.playerWorld.x < 200) { clearInterval(iv); resolve('respawned-first'); }
+    }, 50);
+    setTimeout(() => { clearInterval(iv); resolve('timeout'); }, 1500);
+  }));
+  if (deadTrail === 'timeout') throw new Error('trail never read 0 during the death beat — the death-point rectangle is back');
+  if (deadTrail === 'respawned-first') console.log('render-check: WARNING — death-beat trail check inconclusive (respawn beat the first sample)');
+  else console.log('render-check: trail empty during the death beat (fix holds)');
   // The run auto-respawns after the death pause; the player is alive
   // again near the start.
   // The run auto-respawns after the death pause; the player is alive
