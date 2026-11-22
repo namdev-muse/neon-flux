@@ -1,4 +1,4 @@
-// Neon Flux v0.3.1 — bot harness: the anti-slop gate.
+// Neon Flux v0.3.2 — bot harness: the anti-slop gate.
 //   - Random bot: holds right and flips at random times. It MUST die
 //     on every level — if it clears one, the level is not done.
 //   - Decision bot: the lookahead planner flips with real timing

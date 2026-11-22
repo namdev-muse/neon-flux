@@ -1,4 +1,4 @@
-// Neon Flux v0.3.1 — headless browser render check.
+// Neon Flux v0.3.2 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless browser, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE demo (the attract-mode bot actually
@@ -114,8 +114,8 @@ try {
     throw new Error('game module did not initialise (window.__flux never appeared)');
   }
   const version = await page.evaluate(() => window.__flux.version);
-  if (version !== '0.3.1') throw new Error(`expected version 0.3.1, got ${version}`);
-  console.log('render-check: game module initialised, version 0.3.1');
+  if (version !== '0.3.2') throw new Error(`expected version 0.3.2, got ${version}`);
+  console.log('render-check: game module initialised, version 0.3.2');
 
   // Canvas exists and is on screen.
   const canvas = await page.evaluate(() => {
