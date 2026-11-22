@@ -1,4 +1,4 @@
-// Neon Flux v0.4.0 — headless browser render check.
+// Neon Flux v0.4.1 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless browser, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE demo (the attract-mode bot actually
@@ -118,8 +118,8 @@ try {
     throw new Error('game module did not initialise (window.__flux never appeared)');
   }
   const version = await page.evaluate(() => window.__flux.version);
-  if (version !== '0.4.0') throw new Error(`expected version 0.4.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.4.0');
+  if (version !== '0.4.1') throw new Error(`expected version 0.4.1, got ${version}`);
+  console.log('render-check: game module initialised, version 0.4.1');
 
   // Canvas exists and is on screen.
   const canvas = await page.evaluate(() => {
@@ -263,18 +263,29 @@ try {
   // round-trip landed after the trauma was already gone. The sampler
   // polls every 16ms in-page and keeps the maxima, so it measures
   // what the flip actually did.
+  // v0.4.1: the window is 5s, not 1.2s, and it resolves 300ms after
+  // the flip is seen. The v0.4.1 first run failed with "Space did not
+  // flip gravity" — but a focused probe proves the game is fine
+  // (Space keydown delivered, flip fires in ~32ms, trauma 0.12):
+  // under SwiftShader the main thread can be blocked for the whole
+  // 1.2s window, so NO sampler tick fires and the window expires with
+  // all zeros. A 5s window needs a 5s block to false-negative.
   const settleFeel = await page.evaluate(() => window.__flux.feel());
   const bundlePromise = page.evaluate(() => new Promise((resolve) => {
     const start = performance.now();
-    let maxTrauma = 0, maxCamScale = 0, maxRings = 0, seenFlip = false;
+    let maxTrauma = 0, maxCamScale = 0, maxRings = 0, seenFlip = false, flipAt = 0;
     const iv = setInterval(() => {
       const f = window.__flux.feel();
       const i = window.__flux.info();
-      if (i.playerWorld.grav === -1) seenFlip = true;
+      if (i.playerWorld.grav === -1 && !seenFlip) { seenFlip = true; flipAt = performance.now(); }
       maxTrauma = Math.max(maxTrauma, f.trauma);
       maxCamScale = Math.max(maxCamScale, f.camScale);
       maxRings = Math.max(maxRings, f.shockwaves);
-      if (performance.now() - start > 1200) { clearInterval(iv); resolve({ maxTrauma, maxCamScale, maxRings, seenFlip }); }
+      const elapsed = performance.now() - start;
+      if ((seenFlip && performance.now() - flipAt > 300) || elapsed > 5000) {
+        clearInterval(iv);
+        resolve({ maxTrauma, maxCamScale, maxRings, seenFlip });
+      }
     }, 16);
   }));
   await page.keyboard.press('Space');
@@ -521,10 +532,10 @@ try {
   await page2.click('#btn-levels');
   await page2.waitForFunction(() => !document.getElementById('levels').classList.contains('hidden'), null, { timeout: 5000 });
   const card1 = await page2.locator('#level-grid .level-card').first().textContent();
-  if (!card1.includes('Gold') || !card1.includes('◈ 9/12') || !card1.includes('7.50s')) {
+  if (!card1.includes('Gold') || !card1.includes('◆ 9/12') || !card1.includes('7.50s')) {
     throw new Error(`level 1 card must show its gold medal + orb record, got: ${card1}`);
   }
-  console.log('render-check: level card shows medal + orb record ("Best 7.50s · ◈ 9/12 Gold")');
+  console.log('render-check: level card shows medal + orb record ("Best 7.50s · ◆ 9/12 Gold")');
   await page2.click('#btn-levels-back');
   await page2.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden'), null, { timeout: 5000 });
 
