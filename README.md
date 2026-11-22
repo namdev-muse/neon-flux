@@ -24,6 +24,17 @@ late and the floor spikes get you. Flips only work while standing on a surface
   First Steps, Ceiling Run, Saw Alley, Crusher Row, The Gauntlet, Flux Core,
   Crosswind, Crusher Alley, The Weave, Sawmill, Thunder Row, Event Horizon.
 
+## Progression
+
+- **Medals:** beat a level's par time for Gold, within 1.5× par for Silver.
+  Your best medal and orb record show on the level card — the reason to replay
+  a level you already cleared.
+- **Time Attack** (unlocks after clearing 3 levels): one countdown clock
+  across all 12 levels, starting from the sum of the pars (7:41). Every orb
+  adds +2s, so orbs are the fuel — grabbing one under pressure is worth the
+  risk, skipping one is a real choice. Finish with 2:30+ left for Gold,
+  1:00+ for Silver. Your best finish is saved; a timeout never counts.
+
 ## Controls
 
 | Input | Action |

@@ -1,4 +1,4 @@
-// Neon Flux v0.2.0 — pure simulation core (no DOM, no Canvas).
+// Neon Flux v0.4.0 — pure simulation core (no DOM, no Canvas).
 // 2D neon gravity-flip action-platformer. Run with Left/Right; one
 // button flips gravity, momentum preserved through the flip. There is
 // no jump — the flip IS the jump. Levels are hand-crafted tile maps:
@@ -6,6 +6,12 @@
 // gaps, energy orbs, checkpoints, exit portal. Death resets to the
 // last checkpoint; score from orbs + time bonus; best time saved
 // per level.
+//
+// M4 progression: per-level medals (time vs par), an orb record per
+// level, and Time Attack — one countdown clock across all 12 levels
+// (budget = the sum of the pars), where every orb is worth +2s. The
+// mode is the reason to replay: medals on the level cards, a best
+// Time Attack finish in the save, and the clock as the fail state.
 //
 // Anti-slop: no auto-run, no assist, no "flip now" prompt, nothing
 // that plays for the player. The random-flip bot (hold right, flip at
@@ -17,7 +23,7 @@
 // Deterministic: fixed-step simulation (DT = 1/60), every hazard
 // cycle derived from the run clock, so identical inputs give
 // identical results.
-export const VERSION = '0.3.4';
+export const VERSION = '0.4.0';
 export const TILE = 40;
 export const ROWS = 14;
 export const DT = 1 / 60;
@@ -42,6 +48,23 @@ export const CRUSHER_H = 36;
 export const DEATH_RESPAWN_DELAY = 0.5; // seconds of game time in the death beat
 export const SAVE_KEY = 'neon-flux-save-v1';
 export const SAVE_VERSION = 1;
+
+// --- M4 progression -------------------------------------------------
+// Time Attack: one countdown clock across all 12 levels. The budget
+// is the sum of the level pars (461s) — a par is ~2.7x the decision
+// bot's time on a level, so the budget is ~3.1x a near-optimal run:
+// a good human finishes with time to spare, a struggling one times
+// out. Every orb is worth +2s in the mode, so the orb economy IS the
+// fuel: grabbing orbs under pressure is what keeps the clock alive.
+// Medals: per-level, time vs par (gold <= par, silver <= 1.5x par,
+// bronze = cleared). Time Attack medals: gold >= 150s left on the
+// clock at the finish, silver >= 60s, bronze = finished at all.
+// The mode unlocks once 3 levels are cleared — it is the endgame
+// race, and the gate is "prove you can flip first".
+export const ORB_TIME_BONUS = 2;
+export const TIME_ATTACK_UNLOCK_CLEARS = 3;
+export const TIME_ATTACK_GOLD_LEFT = 150;
+export const TIME_ATTACK_SILVER_LEFT = 60;
 
 // Crusher cycle (seconds): rest up -> telegraph -> slam -> hold down -> retract.
 export const CRUSHER_PHASES = [
@@ -869,8 +892,13 @@ export function simulateRun(levelId, policyFactory, opts = {}) {
 }
 
 // ---------------------------------------------------------------- save
+// best[id] = { time, score, orbs } — time/score are the best-time run,
+// orbs is the most orbs ever collected on the level (a replay for orbs
+// still counts even if it is slower). Medals are DERIVED from the best
+// time (medalForTime), never stored, so there is one source of truth.
+// attack = the best Time Attack finish, or null.
 export function defaultSave() {
-  return { version: SAVE_VERSION, best: {}, unlocked: 1, settings: { muted: false, shake: 1, flash: true } };
+  return { version: SAVE_VERSION, best: {}, unlocked: 1, attack: null, settings: { muted: false, shake: 1, flash: true } };
 }
 export function serializeSave(save) { return JSON.stringify(save); }
 export function parseSave(text) {
@@ -880,10 +908,23 @@ export function parseSave(text) {
     const out = defaultSave();
     if (s.best && typeof s.best === 'object') {
       for (const [k, v] of Object.entries(s.best)) {
-        if (v && typeof v.time === 'number' && typeof v.score === 'number') out.best[k] = { time: v.time, score: v.score };
+        if (v && typeof v.time === 'number' && typeof v.score === 'number') {
+          // orbs null = a pre-M4 entry, the count was never recorded.
+          out.best[k] = { time: v.time, score: v.score, orbs: typeof v.orbs === 'number' ? Math.max(0, Math.floor(v.orbs)) : null };
+        }
       }
     }
     if (typeof s.unlocked === 'number') out.unlocked = clamp(Math.floor(s.unlocked), 1, LEVELS.length);
+    if (s.attack && typeof s.attack === 'object' && typeof s.attack.time === 'number'
+      && typeof s.attack.timeLeft === 'number' && typeof s.attack.medal === 'string'
+      && typeof s.attack.orbs === 'number' && typeof s.attack.deaths === 'number'
+      && typeof s.attack.levels === 'number') {
+      out.attack = {
+        time: s.attack.time, timeLeft: s.attack.timeLeft, medal: s.attack.medal,
+        orbs: Math.max(0, Math.floor(s.attack.orbs)), deaths: Math.max(0, Math.floor(s.attack.deaths)),
+        levels: clamp(Math.floor(s.attack.levels), 0, LEVELS.length),
+      };
+    }
     if (s.settings && typeof s.settings === 'object') {
       if (typeof s.settings.muted === 'boolean') out.settings.muted = s.settings.muted;
       if (typeof s.settings.shake === 'number') out.settings.shake = clamp(s.settings.shake, 0, 1);
@@ -892,11 +933,82 @@ export function parseSave(text) {
     return out;
   } catch { return defaultSave(); }
 }
-export function recordBest(save, levelId, time, score) {
+export function recordBest(save, levelId, time, score, orbs = 0) {
   const prev = save.best[levelId];
   const isBest = !prev || time < prev.time;
-  if (isBest) save.best[levelId] = { time, score };
+  if (isBest) {
+    save.best[levelId] = { time, score, orbs: Math.max(typeof prev?.orbs === 'number' ? prev.orbs : 0, orbs) };
+  } else if (prev && orbs > (typeof prev.orbs === 'number' ? prev.orbs : 0)) {
+    // A slower run that grabs more orbs still improves the orb record.
+    prev.orbs = orbs;
+  }
   if (levelId < LEVELS.length) save.unlocked = Math.max(save.unlocked, levelId + 1);
   return isBest;
 }
 export function isLevelUnlocked(save, levelId) { return levelId <= save.unlocked; }
+
+// ---------------------------------------------------------------- progression (M4)
+export function timeAttackBudget() {
+  return LEVELS.reduce((a, l) => a + l.par, 0);
+}
+// Per-level medal from a clear time vs the level par.
+export function medalForTime(levelId, time) {
+  const def = levelById(levelId);
+  if (!def) return 'bronze';
+  if (time <= def.par) return 'gold';
+  if (time <= def.par * 1.5) return 'silver';
+  return 'bronze';
+}
+// Time Attack medal from the clock left at the finish.
+export function timeAttackMedal(timeLeft) {
+  if (timeLeft >= TIME_ATTACK_GOLD_LEFT) return 'gold';
+  if (timeLeft >= TIME_ATTACK_SILVER_LEFT) return 'silver';
+  return 'bronze';
+}
+export function isTimeAttackUnlocked(save) {
+  return Object.keys(save.best).length >= TIME_ATTACK_UNLOCK_CLEARS;
+}
+// Best Time Attack finish is the fastest total time. Returns true on
+// a new best (only finishes count — a timeout is never a best).
+// The result shape is the one endTimeAttack / simulateTimeAttack
+// produce: { finished, totalTime, timeLeft, medal, orbs, deaths, levels }.
+export function recordAttackBest(save, result) {
+  if (!result || !result.finished || typeof result.totalTime !== 'number') return false;
+  const prev = save.attack;
+  if (prev && prev.time <= result.totalTime) return false;
+  save.attack = {
+    time: result.totalTime, timeLeft: result.timeLeft, medal: result.medal,
+    orbs: result.orbs, deaths: result.deaths, levels: result.levels,
+  };
+  return true;
+}
+
+// Play a whole Time Attack through a policy factory: all 12 levels in
+// order on one clock (budget + 2s per orb, minus the time each level
+// takes, deaths included — the respawn time is part of the cost).
+// A level the policy cannot win ends the attack there; the clock is
+// charged the full attempt, so a masher that stalls on level 1 runs
+// the clock out instead of "failing fast".
+export function simulateTimeAttack(policyFactory, opts = {}) {
+  const maxSecondsPerLevel = opts.maxSecondsPerLevel || 600;
+  const budget = timeAttackBudget();
+  let totalTime = 0, totalOrbs = 0, totalDeaths = 0, reached = 0;
+  for (const level of LEVELS) {
+    const r = simulateRun(level.id, policyFactory, { maxSeconds: maxSecondsPerLevel });
+    totalTime += r.time; totalOrbs += r.orbs; totalDeaths += r.deaths;
+    reached = level.id;
+    if (!r.won) {
+      const timeLeft = budget + ORB_TIME_BONUS * totalOrbs - totalTime;
+      return {
+        finished: false, reachedLevel: reached, timeLeft, totalTime,
+        orbs: totalOrbs, deaths: totalDeaths, levels: reached - 1, medal: null,
+      };
+    }
+  }
+  const timeLeft = budget + ORB_TIME_BONUS * totalOrbs - totalTime;
+  return {
+    finished: timeLeft > 0, reachedLevel: LEVELS.length, timeLeft, totalTime,
+    orbs: totalOrbs, deaths: totalDeaths, levels: LEVELS.length,
+    medal: timeLeft > 0 ? timeAttackMedal(timeLeft) : null,
+  };
+}

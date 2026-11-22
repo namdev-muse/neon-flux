@@ -1,17 +1,28 @@
-// Neon Flux v0.3.4 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
+// Neon Flux v0.4.0 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
 // Presentation layer: rendering, input, screens, audio, game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns
 // everything the player sees and hears. No build step, no Three.js.
+//
+// M4: Time Attack mode (one countdown clock across all 12 levels,
+// orbs worth +2s) + per-level medals + orb records on the level cards.
 import {
   VERSION, TILE, ROWS, DT, LEVELS, levelById, parseLevel, createRun,
   stepRun, drainEvents, createDecisionBot, defaultSave, serializeSave,
   parseSave, recordBest, isLevelUnlocked, FEEDBACK, SAVE_VERSION,
   SAW_RADIUS, PLAYER_W, PLAYER_H,
+  ORB_TIME_BONUS, TIME_ATTACK_UNLOCK_CLEARS, medalForTime, timeAttackBudget, timeAttackMedal,
+  isTimeAttackUnlocked, recordAttackBest,
 } from './physics.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
+// mm:ss clock for the Time Attack countdown.
+const fmtClock = (s) => {
+  const t = Math.max(0, Math.ceil(s));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+};
+const medalLabel = (m) => (m === 'gold' ? 'Gold' : m === 'silver' ? 'Silver' : 'Bronze');
 
 // ---------------------------------------------------------------- palette
 const COL = {
@@ -92,6 +103,8 @@ const SFX = {
   click() { tone({ freq: 660, dur: 0.05, type: 'square', vol: 0.1 }); },
   hover() { tone({ freq: 990, dur: 0.03, type: 'sine', vol: 0.05 }); },
   land() { noise({ dur: 0.05, vol: 0.06, freq: 700 }); },
+  timeUp() { [392, 311, 233, 175].forEach((f, i) => tone({ freq: f, dur: 0.22, type: 'triangle', vol: 0.2, when: i * 0.16 })); },
+  attackWin() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone({ freq: f, dur: 0.16, type: 'triangle', vol: 0.2, when: i * 0.1 })); },
 };
 // Simple music loop: a slow minor-key bass pulse + sparse arp + soft pad
 // chords + hat ticks, scheduled a bar ahead so it never stutters. Starts
@@ -362,6 +375,7 @@ window.addEventListener('keydown', (e) => {
     if (phase === 'playing') { ensureAudio(); queueFlip(); }
     else if (phase === 'menu') startLevel(selectedLevel);
     else if (phase === 'complete') nextLevel();
+    else if (phase === 'attack') startTimeAttack();
     else if (phase === 'pause') resumeGame();
     return;
   }
@@ -378,6 +392,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Enter') {
     if (phase === 'menu') startLevel(selectedLevel);
     else if (phase === 'complete') nextLevel();
+    else if (phase === 'attack') startTimeAttack();
     else if (phase === 'pause') resumeGame();
     else if (phase === 'levels') startLevel(selectedLevel);
     return;
@@ -402,11 +417,11 @@ function bindHold(el, on, off) {
 // ---------------------------------------------------------------- screens
 // Screen stack (push/pop, not boolean soup). The canvas keeps rendering
 // underneath; overlays are DOM panels with staggered pop-in.
-let phase = 'menu'; // menu | levels | howto | settings | playing | pause | complete
+let phase = 'menu'; // menu | levels | howto | settings | playing | pause | complete | attack
 const screenStack = [];
 const screenEls = {
   menu: $('menu'), levels: $('levels'), howto: $('howto'), settings: $('settings'),
-  pause: $('pause'), complete: $('complete'), hud: $('hud'), touch: $('touch'),
+  pause: $('pause'), complete: $('complete'), attack: $('attack'), hud: $('hud'), touch: $('touch'),
 };
 function showScreen(id) {
   const isTouch = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
@@ -424,7 +439,7 @@ function showScreen(id) {
     }
   }
   // Focus the primary control of the new screen (one focused control).
-  const focusMap = { menu: 'btn-play', levels: 'btn-levels-back', howto: 'btn-howto-back', settings: 'btn-settings-back', pause: 'btn-resume', complete: 'btn-next' };
+  const focusMap = { menu: 'btn-play', levels: 'btn-levels-back', howto: 'btn-howto-back', settings: 'btn-settings-back', pause: 'btn-resume', complete: 'btn-next', attack: 'btn-attack-retry' };
   const f = focusMap[id] && $(focusMap[id]);
   if (f) f.focus({ preventScroll: true });
 }
@@ -437,8 +452,8 @@ function popScreen() {
 }
 function goMenu() {
   screenStack.length = 0;
-  phase = 'menu'; run = null; autopilot = null;
-  showScreen('menu'); refreshMenuBest(); startAttract();
+  phase = 'menu'; run = null; autopilot = null; attack = null;
+  showScreen('menu'); refreshMenuBest(); refreshAttackButton(); startAttract();
 }
 function updateMuteLabels() {
   const label = muted ? 'Sound: Off' : 'Sound: On';
@@ -458,15 +473,20 @@ let levelId = 1, selectedLevel = 1;
 let autopilot = null;     // decision-bot driver (attract mode + __flux.autopilot)
 let demoRun = null;       // attract-mode run (decision bot on level 1)
 let demoBot = null;
+// Time Attack (M4): one countdown clock across all 12 levels, orbs
+// worth +2s. null outside the mode. idx is the 0-based level index
+// currently being played; totalTime/deaths accumulate finished levels.
+let attack = null;
 let lastTime = 0, fpsEma = 60, accumulator = 0;
 function currentLevel() { return run ? run.level : null; }
 function levelDef(id) { return levelById(id); }
 
-function startLevel(id) {
+function startLevel(id, opts = {}) {
   ensureAudio(); startMusic();
   levelId = id; selectedLevel = id;
   run = createRun(id);
   autopilot = null; demoRun = null;
+  if (!opts.keepAttack) attack = null;
   trail.length = 0; pops.length = 0; shockwaves.length = 0;
   for (const p of particles) p.alive = false;
   trauma = 0; hitStopT = 0; slowMoT = 0; timeScale = 1;
@@ -480,12 +500,61 @@ function startLevel(id) {
   const def = levelDef(id);
   toast(def ? `${def.name} — ${def.hint}` : '', 3600);
 }
-function restartLevel() { if (run) startLevel(run.levelId); }
+function restartLevel() { if (run) startLevel(run.levelId, { keepAttack: !!attack }); }
 function nextLevel() {
   if (!run) return;
+  // Time Attack continues through its own sequence, not the unlock chain.
+  if (attack) {
+    attack.idx++;
+    if (attack.idx >= LEVELS.length) { endTimeAttack(true); return; }
+    startLevel(LEVELS[attack.idx].id, { keepAttack: true });
+    return;
+  }
   const next = run.levelId + 1;
   if (next <= LEVELS.length && isLevelUnlocked(save, next)) startLevel(next);
   else goMenu();
+}
+// --- Time Attack (M4) -------------------------------------------------
+// Why this mode: the flip is a speed skill — every flip-timing
+// decision is already a time decision. Racing one clock across all 12
+// levels turns the whole game into that decision, and orbs become the
+// fuel (+2s each), so the orb economy finally matters: grabbing an orb
+// under pressure is worth the risk, skipping one is a real choice.
+// The gate is clearing 3 levels first ("prove you can flip").
+function startTimeAttack() {
+  if (!isTimeAttackUnlocked(save)) return;
+  ensureAudio(); startMusic();
+  attack = { idx: 0, timeLeft: timeAttackBudget(), totalTime: 0, orbs: 0, deaths: 0 };
+  startLevel(LEVELS[0].id, { keepAttack: true });
+  toast(`Time Attack — ${fmtClock(attack.timeLeft)} on the clock. Orbs add +${ORB_TIME_BONUS}s.`, 4200);
+}
+function endTimeAttack(finished) {
+  if (!attack) return;
+  // Totals come from attack as-is: callers bank the current level's
+  // time/deaths first (completeLevel for a finish, the timeout branch
+  // for a mid-level clock-out), so nothing is ever counted twice.
+  const totalTime = attack.totalTime;
+  const deaths = attack.deaths;
+  const levels = finished ? LEVELS.length : attack.idx;
+  const medal = finished ? timeAttackMedal(attack.timeLeft) : null;
+  const result = { finished, reachedLevel: finished ? LEVELS.length : attack.idx + 1, timeLeft: attack.timeLeft, totalTime, orbs: attack.orbs, deaths, levels, medal };
+  const isBest = recordAttackBest(save, result);
+  persistSave();
+  if (finished) SFX.attackWin(); else SFX.timeUp();
+  if (finished) flash('52,211,153', 0.25);
+  else flash('244,114,182', 0.3);
+  attack = null;
+  phase = 'attack';
+  $('attack-title').textContent = finished ? `Time Attack — ${medalLabel(medal)}!` : 'Time Up!';
+  $('attack-sub').textContent = finished
+    ? (isBest ? 'New best Time Attack!' : `Best ${fmtClock(save.attack.time)} · ${medalLabel(save.attack.medal)}`)
+    : `The clock ran out on level ${result.reachedLevel} — ${LEVELS[result.reachedLevel - 1].name}.`;
+  $('attack-time').textContent = finished ? `Total ${fmtClock(totalTime)}` : `Lasted ${fmtClock(totalTime)}`;
+  $('attack-left').textContent = finished ? `${fmtClock(result.timeLeft)} left on the clock` : `${fmtClock(Math.max(0, result.timeLeft))} left`;
+  $('attack-orbs').textContent = `◈ ${result.orbs} orbs (+${ORB_TIME_BONUS}s each)`;
+  $('attack-deaths').textContent = `☠ ${deaths} deaths · ${levels}/12 levels`;
+  showScreen('attack');
+  updateHUD(true);
 }
 function pauseGame() {
   if (phase !== 'playing') return;
@@ -501,18 +570,30 @@ function completeLevel() {
   const def = run.level;
   const time = run.time;
   const score = run.score;
-  const isBest = recordBest(save, run.levelId, time, score);
+  const isBest = recordBest(save, run.levelId, time, score, run.orbsGot);
   persistSave();
+  // Time Attack: bank this level's time/deaths, then either roll on
+  // to the next level in the sequence or finish the run at level 12.
+  if (attack) {
+    attack.totalTime += time;
+    attack.deaths += run.deaths;
+    if (attack.idx >= LEVELS.length - 1) { endTimeAttack(true); return; }
+  }
+  const medal = medalForTime(run.levelId, time);
   phase = 'complete';
   $('complete-title').textContent = `${def.name} — Clear!`;
-  $('complete-time').textContent = `Time ${time.toFixed(2)}s`;
+  $('complete-time').textContent = attack
+    ? `Time ${time.toFixed(2)}s · ⏱ ${fmtClock(attack.timeLeft)} left`
+    : `Time ${time.toFixed(2)}s`;
   $('complete-score').textContent = `Score ${score}`;
   $('complete-orbs').textContent = `Orbs ${run.orbsGot}/${run.orbs.length}`;
   $('complete-deaths').textContent = `Deaths ${run.deaths}`;
-  $('complete-best').textContent = isBest
-    ? `New best time!`
-    : `Best ${save.best[run.levelId] ? save.best[run.levelId].time.toFixed(2) + 's' : '—'}`;
-  const hasNext = run.levelId + 1 <= LEVELS.length && isLevelUnlocked(save, run.levelId + 1);
+  $('complete-best').textContent = attack
+    ? `${isBest ? 'New best time! · ' : ''}${medalLabel(medal)} medal · Level ${attack.idx + 1}/12`
+    : (isBest ? `New best time! · ${medalLabel(medal)} medal` : `Best ${save.best[run.levelId] ? save.best[run.levelId].time.toFixed(2) + 's' : '—'} · ${medalLabel(medal)} medal`);
+  const hasNext = attack
+    ? true
+    : run.levelId + 1 <= LEVELS.length && isLevelUnlocked(save, run.levelId + 1);
   $('btn-next').textContent = hasNext ? 'Next Level' : 'Level Select';
   $('btn-next').style.display = '';
   showScreen('complete');
@@ -557,7 +638,15 @@ function handleEvents(events) {
         lastOrbAt = now;
         SFX.orb(orbCombo);
         burst(e.x, e.y, 12, COL.orb, 200, 0.5, 3);
-        addPop(e.x, e.y - 14, orbCombo > 1 ? `+100 ×${orbCombo}` : '+100', COL.orb);
+        // Time Attack: orbs ARE the clock — +2s each, and the pop says
+        // so. Score still accrues underneath.
+        if (attack) {
+          attack.timeLeft += ORB_TIME_BONUS;
+          attack.orbs++;
+          addPop(e.x, e.y - 14, `+${ORB_TIME_BONUS}s`, COL.orb);
+        } else {
+          addPop(e.x, e.y - 14, orbCombo > 1 ? `+100 ×${orbCombo}` : '+100', COL.orb);
+        }
         break;
       }
       case 'checkpoint':
@@ -614,13 +703,23 @@ function updateHUD(force = false) {
   const text = [
     def.name, run.orbsGot, run.orbs.length, run.score,
     run.time.toFixed(1), run.deaths, best ? best.time.toFixed(2) : '—',
+    attack ? attack.timeLeft.toFixed(1) : '',
   ].join('|');
   if (!force && text === hudCache) return;
   hudCache = text;
-  $('hud-level').textContent = `${def.id} · ${def.name}`;
+  $('hud-level').textContent = attack ? `TA ${attack.idx + 1}/12 · ${def.name}` : `${def.id} · ${def.name}`;
+  // Time Attack: the HUD clock is the countdown, not the level time.
+  // It turns red under 30s — the "hurry" read at a glance.
+  const timeEl = $('hud-time');
+  if (attack) {
+    timeEl.textContent = `⏱ ${fmtClock(attack.timeLeft)}`;
+    timeEl.classList.toggle('low', attack.timeLeft < 30);
+  } else {
+    timeEl.textContent = `${run.time.toFixed(1)}s`;
+    timeEl.classList.remove('low');
+  }
   $('hud-orbs').textContent = `◈ ${run.orbsGot}/${run.orbs.length}`;
   $('hud-score').textContent = `Score ${run.score}`;
-  $('hud-time').textContent = `${run.time.toFixed(1)}s`;
   $('hud-deaths').textContent = `☠ ${run.deaths}`;
   $('hud-best').textContent = best ? `Best ${best.time.toFixed(2)}s` : 'Best —';
 }
@@ -637,9 +736,32 @@ function refreshMenuBest() {
   const el = $('menu-best');
   if (!el) return;
   const cleared = Object.keys(save.best).length;
-  el.textContent = cleared > 0
-    ? `${cleared} of ${LEVELS.length} levels cleared — keep flipping.`
-    : `No runs yet — ${LEVELS.length} levels of spikes, saws and crushers await.`;
+  if (cleared === 0) {
+    el.textContent = `No runs yet — ${LEVELS.length} levels of spikes, saws and crushers await.`;
+    return;
+  }
+  // Medals are derived from best times, so this line is always honest.
+  const medals = { gold: 0, silver: 0, bronze: 0 };
+  for (const [id, b] of Object.entries(save.best)) medals[medalForTime(Number(id), b.time)]++;
+  let text = `${cleared} of ${LEVELS.length} levels cleared · ${medals.gold} gold, ${medals.silver} silver, ${medals.bronze} bronze.`;
+  if (save.attack) text += ` Time Attack best ${fmtClock(save.attack.time)} · ${medalLabel(save.attack.medal)}.`;
+  el.textContent = text;
+}
+// Time Attack button: a locked gate, not a dead button — it says
+// exactly what unlocks it and how far along the player is.
+function refreshAttackButton() {
+  const btn = $('btn-attack');
+  if (!btn) return;
+  const cleared = Object.keys(save.best).length;
+  if (isTimeAttackUnlocked(save)) {
+    btn.disabled = false;
+    btn.textContent = save.attack
+      ? `⏱ Time Attack — best ${fmtClock(save.attack.time)} · ${medalLabel(save.attack.medal)}`
+      : '⏱ Time Attack';
+  } else {
+    btn.disabled = true;
+    btn.textContent = `⏱ Time Attack — clear ${TIME_ATTACK_UNLOCK_CLEARS} levels (${cleared}/${TIME_ATTACK_UNLOCK_CLEARS})`;
+  }
 }
 function refreshLevelSelect() {
   const grid = $('level-grid');
@@ -653,9 +775,12 @@ function refreshLevelSelect() {
     card.className = 'level-card' + (unlocked ? '' : ' locked');
     card.style.setProperty('--accent', def.accent);
     card.disabled = !unlocked;
+    // Medal + orb record on the card: the replay reason, at a glance.
+    const medal = best ? `<span class="level-medal medal-${medalForTime(def.id, best.time)}">${medalLabel(medalForTime(def.id, best.time))}</span>` : '';
+    const orbPart = best && best.orbs > 0 ? ` · ◈ ${best.orbs}/${parseLevel(def).orbs.length}` : '';
     card.innerHTML = `<span class="level-num">${def.id}</span>`
       + `<span class="level-name">${def.name}</span>`
-      + `<span class="level-meta">${unlocked ? (best ? `Best ${best.time.toFixed(2)}s · ${best.score} pts` : def.hint) : 'Clear the previous level to unlock'}</span>`;
+      + `<span class="level-meta">${unlocked ? (best ? `Best ${best.time.toFixed(2)}s${orbPart} ${medal}` : def.hint) : 'Clear the previous level to unlock'}</span>`;
     card.addEventListener('click', () => { ensureAudio(); startLevel(def.id); });
     card.addEventListener('mouseenter', () => { if (!muted) SFX.hover(); });
     grid.appendChild(card);
@@ -710,6 +835,22 @@ function stepGame(dt) {
   const wasGrounded = run.player.grounded;
   const px = run.player.x, py = run.player.y;
   stepRun(run, input, DT);
+  // Time Attack: the clock runs in fixed sim steps, so it ticks
+  // through deaths and slow-mo alike — dying costs clock, pausing
+  // does not (stepGame never runs while paused). At zero the run ends.
+  if (attack && !run.done) {
+    attack.timeLeft -= DT;
+    if (attack.timeLeft <= 0) {
+      attack.timeLeft = 0;
+      // Bank the partial level before ending: endTimeAttack reads the
+      // totals as-is, so the run's elapsed time is counted exactly once.
+      attack.totalTime += run.time;
+      attack.deaths += run.deaths;
+      updateHUD(true);
+      endTimeAttack(false);
+      return;
+    }
+  }
   const events = drainEvents(run);
   handleEvents(events);
   // Landing dust + squash.
@@ -1001,6 +1142,7 @@ window.__flux = {
       deaths: run ? run.deaths : null, time: run ? run.time : null,
       done: run ? run.done : null, won: run ? run.won : null,
       muted, fps: Math.round(fpsEma),
+      attack: attack ? { level: attack.idx + 1, timeLeft: attack.timeLeft, orbs: attack.orbs } : null,
     };
   },
   info() {
@@ -1023,6 +1165,20 @@ window.__flux = {
     }));
   },
   startLevel(id) { startLevel(id); },
+  startTimeAttack() { startTimeAttack(); },
+  attack() {
+    return attack ? {
+      level: attack.idx + 1, levels: LEVELS.length,
+      timeLeft: attack.timeLeft, totalTime: attack.totalTime,
+      orbs: attack.orbs, deaths: attack.deaths,
+      budget: timeAttackBudget(),
+    } : null;
+  },
+  isTimeAttackUnlocked() { return isTimeAttackUnlocked(save); },
+  timeAttackBudget() { return timeAttackBudget(); },
+  // Test hook (render check only): force the attack clock, to drive
+  // the timeout path without waiting out the full 461s budget.
+  attackSetTimeLeft(s) { if (attack) attack.timeLeft = s; },
   setMove(dir) { keys.left = dir < 0; keys.right = dir > 0; },
   flip() { if (phase === 'playing') { ensureAudio(); queueFlip(); } },
   autopilot(on) {
@@ -1059,6 +1215,9 @@ function playerScreenPosFor(r) {
 // ---------------------------------------------------------------- wiring + init
 function bindUI() {
   $('btn-play').addEventListener('click', () => startLevel(selectedLevel));
+  $('btn-attack').addEventListener('click', () => startTimeAttack());
+  $('btn-attack-retry').addEventListener('click', () => startTimeAttack());
+  $('btn-attack-menu').addEventListener('click', () => quitToMenu());
   $('btn-levels').addEventListener('click', () => { refreshLevelSelect(); pushScreen('levels'); });
   $('btn-howto').addEventListener('click', () => pushScreen('howto'));
   $('btn-settings').addEventListener('click', () => pushScreen('settings'));
@@ -1088,7 +1247,8 @@ function bindUI() {
   }
   const resetBtn = $('btn-reset-best');
   if (resetBtn) resetBtn.addEventListener('click', () => {
-    save.best = {}; save.unlocked = 1; persistSave(); refreshMenuBest(); refreshLevelSelect();
+    save.best = {}; save.unlocked = 1; save.attack = null; persistSave();
+    refreshMenuBest(); refreshAttackButton(); refreshLevelSelect();
     toast('Best times cleared', 2000);
   });
   // Touch controls.
@@ -1107,6 +1267,7 @@ bindUI();
 updateMuteLabels();
 updateFlashLabel();
 refreshMenuBest();
+refreshAttackButton();
 selectedLevel = save.unlocked || 1;
 goMenu();
 lastTime = performance.now();

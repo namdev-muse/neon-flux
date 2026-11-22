@@ -44,6 +44,7 @@ html, body {
 .hud-orbs { color: var(--gold); font-weight: 700; white-space: nowrap; }
 .hud-score { font-weight: 700; white-space: nowrap; }
 .hud-time { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.hud-time.low { color: var(--pink); }
 .hud-deaths { color: var(--pink); font-weight: 700; white-space: nowrap; }
 .hud-btn {
   background: rgba(139, 92, 246, 0.16); color: var(--text);
@@ -120,6 +121,8 @@ html, body {
 .btn.primary:hover { box-shadow: 0 0 32px rgba(34, 211, 238, 0.55); }
 .btn.ghost { min-width: 0; padding: 8px 14px; font-size: 13px; background: transparent; }
 .btn.danger { border-color: rgba(244, 114, 182, 0.6); color: var(--pink); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn:disabled:hover { transform: none; background: rgba(139, 92, 246, 0.14); box-shadow: none; }
 
 /* ---------- Level select ---------- */
 .levels-panel { max-width: 780px; width: min(94vw, 780px); }
@@ -142,6 +145,10 @@ html, body {
 .level-num { font-size: 12px; color: var(--accent, var(--violet)); font-weight: 800; letter-spacing: 0.2em; }
 .level-name { font-size: 17px; font-weight: 800; }
 .level-meta { font-size: 13px; color: var(--dim); }
+.level-medal { font-weight: 800; font-size: 12px; letter-spacing: 0.06em; padding: 1px 7px; border-radius: 20px; }
+.level-medal.medal-gold { color: #78350f; background: var(--gold); }
+.level-medal.medal-silver { color: #1e293b; background: #cbd5e1; }
+.level-medal.medal-bronze { color: #fff7ed; background: #b45309; }
 
 /* ---------- How to / settings / complete ---------- */
 .howto-list { text-align: left; margin: 0 0 18px; padding-left: 20px; line-height: 1.75; font-size: 15px; }
