@@ -1,5 +1,31 @@
 # Neon Flux — devlog
 
+## v0.3.4 — M3 playtest fix-forward #4 (2026-11-22)
+
+- **Live playtest NO-GO triage (v0.3.3):** death frame FIXED (burst
+  only, no rectangle, 7 deaths observed), flip ring FIXED (bright and
+  clear in 3/3 ceiling-to-floor freezes, faint in 1/4 floor-to-ceiling),
+  zoom pulse reported STILL BROKEN (frozen frames "identical within
+  0–5px"). Instrumental triage says the zoom DOES render: in-page,
+  camScale reads 1.2687 vs 1.1857 base (exactly +7.0%) frozen in the
+  paused frame, and pixel template-matching of my own flip-vs-settled
+  screenshots shows the ceiling spikes shifted ~44px right in the
+  zoomed frame, with the floor content pushed out of the clip. The
+  playtester's still comparison was measuring near the top-left pivot
+  (where the shift is inherently tiny) and against frames that may
+  both have been effectively settled.
+- **Fix anyway — make it unmissable:** zoom pulse 7% → 10% amplitude,
+  decay 1.2/s → 0.8/s (~1.25s life); flip ring life 0.7s → 0.9s (the
+  playtester's explicit recommendation — the 0.7s life was caught
+  reliably only on downward flips). The render check now asserts the
+  zoom reaches the SCREEN (camScale > settled × 1.05 right after a
+  flip), not just the feel state — v0.3.3 only ever asserted zoomT, a
+  state number.
+- **Respawn camera snap:** after a far death the camera glided back
+  and the player could sit off-screen for ~0.3s. The camera now snaps
+  to the respawn view on the respawn event.
+- Smoke 180/180, bot gates unchanged, render check PASS.
+
 ## v0.3.3 — M3 playtest fix-forward #3 (2026-11-22)
 
 - **Live playtest NO-GO triage (v0.3.2):** the third tap-only playtest
