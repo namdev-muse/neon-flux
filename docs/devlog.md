@@ -1,5 +1,42 @@
 # Neon Flux — devlog
 
+## v0.4.0 — M4 progression & depth (2026-11-22)
+
+- **Time Attack (the one extra mode, done properly).** Why this mode
+  and not another: the flip is a speed skill — every flip-timing
+  decision is already a time decision. Racing one clock across all 12
+  levels turns the whole game into that decision, and orbs become the
+  fuel (+2s each), so the orb economy finally matters: grabbing an orb
+  under pressure is worth the risk, skipping one is a real choice.
+  Budget = the sum of the pars (461s, 7:41) — a par is ~2.7x the
+  decision bot's time per level, so the budget is ~3.1x a near-optimal
+  run: a good human finishes with time to spare, a struggling one
+  times out. Death costs clock (respawn time is part of it); pausing
+  does not (the clock ticks in fixed sim steps, never while paused).
+  Medals: Gold at 150s+ left, Silver at 60s+, Bronze for finishing.
+  Unlocks after clearing 3 levels — the gate is "prove you can flip",
+  and the button says so (locked label names the gate + progress,
+  never a dead button). Best finish saved; a timeout never counts.
+- **Per-level medals + orb records.** Medals are derived from the best
+  time vs par (Gold <= par, Silver <= 1.5x par, Bronze = cleared) —
+  never stored, so there is one source of truth. The level card shows
+  best time, medal badge and best orb count: the replay reason at a
+  glance. `recordBest` now keeps the max orbs ever collected, so a
+  slower run that grabs more orbs still improves the record. Pre-M4
+  saves migrate cleanly (times kept, orb count unknown rather than a
+  false zero); the save version stays 1 — the new fields are optional.
+- **HUD in Time Attack:** the clock replaces the level timer (mm:ss
+  countdown, red under 30s) and the level label reads `TA n/12`.
+  Complete screen names the level medal + `Level n/12`; the results
+  screen names the medal or the level where the clock ran out, with
+  Retry / Menu. Orb pops read `+2s` in the mode.
+- Verified: smoke 215/215 (incl. full Time Attack sims — decision bot
+  finishes 146.8s total, 502.2s left, Gold; random bot stalls on L1,
+  clock runs out at −131s), bot gates pass, render check PASS
+  (lock gate 0/3, seeded 3-clear unlock, countdown HUD, clock rises
+  past the 461s budget on orbs, advance 1→2, timeout + retry).
+  Live playtest: PENDING at push time (see milestone log).
+
 ## v0.3.4 — M3 playtest fix-forward #4 (2026-11-22)
 
 - **Live playtest NO-GO triage (v0.3.3):** death frame FIXED (burst
