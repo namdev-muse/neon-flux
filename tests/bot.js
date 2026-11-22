@@ -1,4 +1,4 @@
-// Neon Flux v0.3.4 — bot harness: the anti-slop gate.
+// Neon Flux v0.4.0 — bot harness: the anti-slop gate.
 //   - Random bot: holds right and flips at random times. It MUST die
 //     on every level — if it clears one, the level is not done.
 //   - Decision bot: the lookahead planner flips with real timing
@@ -6,8 +6,11 @@
 //     clear all 12 levels — if it cannot, the level is unfair or the
 //     planner is blind.
 //   - Stationary bot: sitting still must never win.
+//   - Time Attack: the decision bot must finish all 12 levels on one
+//     clock (budget = sum of pars, +2s per orb); the random bot must
+//     stall on level 1 and run the clock out.
 // Usage: node tests/bot.js
-import { LEVELS, simulateRun, createRandomBot, createRandomBotAtRate, createDecisionBot, stationaryPolicy } from '../physics.js';
+import { LEVELS, simulateRun, createRandomBot, createRandomBotAtRate, createDecisionBot, stationaryPolicy, simulateTimeAttack } from '../physics.js';
 
 let failures = 0;
 for (const level of LEVELS) {
@@ -54,6 +57,22 @@ for (const rate of [
   }
 }
 console.log('bot: multi-rate random check done on all levels');
+
+// Time Attack gates (M4): the decision bot finishes the whole gauntlet
+// on one clock with a gold medal; the random bot stalls on level 1 and
+// runs the clock out (a masher must not be able to luck through the mode).
+{
+  const t0 = Date.now();
+  const ta = simulateTimeAttack(createDecisionBot);
+  console.log(`Time Attack decision bot: ${ta.finished ? 'FINISH' : 'FAIL'} — ${ta.totalTime.toFixed(1)}s total, ${ta.timeLeft.toFixed(1)}s left, ${ta.orbs} orbs, ${ta.deaths} deaths, medal ${ta.medal} (${Date.now() - t0}ms)`);
+  if (!ta.finished) { failures++; console.error('  BOT FAIL: decision bot did not finish the Time Attack'); }
+  if (ta.medal !== 'gold') { failures++; console.error(`  BOT FAIL: decision bot finished Time Attack with ${ta.medal}, not gold (timeLeft ${ta.timeLeft.toFixed(1)}s)`); }
+  const taRandom = simulateTimeAttack(() => createRandomBot(42));
+  console.log(`Time Attack random bot: ${taRandom.finished ? 'FINISH (SLOP!)' : 'FAIL'} — reached level ${taRandom.reachedLevel}, ${taRandom.timeLeft.toFixed(1)}s left`);
+  if (taRandom.finished) { failures++; console.error('  BOT FAIL: random bot finished the Time Attack — the mode has no teeth'); }
+  if (taRandom.reachedLevel !== 1) { failures++; console.error(`  BOT FAIL: random bot reached level ${taRandom.reachedLevel} of the Time Attack — it must stall on level 1`); }
+  if (taRandom.timeLeft > 0) { failures++; console.error(`  BOT FAIL: random bot left ${taRandom.timeLeft.toFixed(1)}s on the Time Attack clock — the clock must run out`); }
+}
 
 if (failures > 0) { console.error(`bot: ${failures} failure(s)`); process.exit(1); }
 console.log('bot: all gates pass — random dies everywhere, decision clears everything');

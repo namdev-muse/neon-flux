@@ -1,4 +1,4 @@
-// Neon Flux v0.3.4 — Node smoke tests for physics.js (no DOM, no Canvas).
+// Neon Flux v0.4.0 — Node smoke tests for physics.js (no DOM, no Canvas).
 // Covers level validity, flip/momentum physics, hazards, checkpoints,
 // scoring, saves, and the anti-slop gates on level 1 (the full 6-level
 // bot gate lives in tests/bot.js). Exit 0 when all pass.
@@ -9,6 +9,9 @@ import {
   simulateRun, createRandomBot, createDecisionBot, stationaryPolicy,
   defaultSave, serializeSave, parseSave, recordBest, isLevelUnlocked,
   SAVE_VERSION, mulberry32, clamp, FEEDBACK, FEEDBACK_LAYERS,
+  ORB_TIME_BONUS, TIME_ATTACK_UNLOCK_CLEARS, TIME_ATTACK_GOLD_LEFT, TIME_ATTACK_SILVER_LEFT,
+  timeAttackBudget, medalForTime, timeAttackMedal, isTimeAttackUnlocked,
+  recordAttackBest, simulateTimeAttack,
 } from '../physics.js';
 
 let passed = 0, failed = 0;
@@ -19,7 +22,7 @@ function check(name, cond, extra) {
 }
 function approx(a, b, eps = 1e-6) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.3.4', VERSION === '0.3.4');
+check('physics version is 0.4.0', VERSION === '0.4.0');
 check('12 levels defined', LEVELS.length === 12);
 check('level ids are 1..12 in order', LEVELS.every((l, i) => l.id === i + 1));
 check('every level has a name, hint, par and accent', LEVELS.every((l) => l.name && l.hint && l.par > 0 && l.accent));
@@ -247,6 +250,81 @@ check('later levels have checkpoints', LEVELS.slice(1).every((d) => parseLevel(d
   check('save round-trips through JSON', round.best[1].time === 15.2 && round.unlocked === 2);
   check('corrupt save falls back to defaults', parseSave('not json').unlocked === 1);
   check('save version is 1', SAVE_VERSION === 1);
+  check('default save has no Time Attack result yet', defaultSave().attack === null);
+}
+
+// --- M4 progression: medals, orb records, Time Attack ---
+{
+  // Medals: time vs par (L1 par 20 — gold at par, silver to 1.5x par).
+  check('medal gold at par', medalForTime(1, 20) === 'gold');
+  check('medal gold under par', medalForTime(1, 7.5) === 'gold');
+  check('medal silver between par and 1.5x par', medalForTime(1, 25) === 'silver' && medalForTime(1, 30) === 'silver');
+  check('medal bronze past 1.5x par', medalForTime(1, 30.01) === 'bronze' && medalForTime(1, 90) === 'bronze');
+  check('medal uses each level\'s own par', medalForTime(12, 55) === 'gold' && medalForTime(12, 56) === 'silver');
+  check('medal for an unknown level is bronze', medalForTime(99, 1) === 'bronze');
+  // Time Attack budget is the sum of the pars.
+  const pars = LEVELS.reduce((a, l) => a + l.par, 0);
+  check('Time Attack budget is the sum of the pars (461s)', timeAttackBudget() === 461 && timeAttackBudget() === pars, `budget=${timeAttackBudget()}`);
+  check('each orb is worth +2s in Time Attack', ORB_TIME_BONUS === 2);
+  // Time Attack medals from the clock left at the finish.
+  check('Time Attack gold needs 150s+ left', timeAttackMedal(150) === 'gold' && timeAttackMedal(502) === 'gold');
+  check('Time Attack silver needs 60s+ left', timeAttackMedal(60) === 'silver' && timeAttackMedal(149.9) === 'silver');
+  check('Time Attack bronze is finishing at all', timeAttackMedal(0.5) === 'bronze' && timeAttackMedal(59.9) === 'bronze');
+  check('medal thresholds are ordered gold > silver', TIME_ATTACK_GOLD_LEFT > TIME_ATTACK_SILVER_LEFT);
+  // The unlock gate: 3 clears.
+  check('Time Attack unlocks after 3 clears', TIME_ATTACK_UNLOCK_CLEARS === 3);
+  {
+    const s = defaultSave();
+    check('Time Attack locked on a fresh save', isTimeAttackUnlocked(s) === false);
+    recordBest(s, 1, 10, 1000, 9); recordBest(s, 2, 10, 1000, 5);
+    check('Time Attack still locked at 2 clears', isTimeAttackUnlocked(s) === false);
+    recordBest(s, 3, 10, 1000, 7);
+    check('Time Attack unlocked at 3 clears', isTimeAttackUnlocked(s) === true);
+  }
+  // Orb records: best time wins, but a slower run with more orbs still
+  // improves the orb count — replays for orbs count.
+  {
+    const s = defaultSave();
+    recordBest(s, 1, 18.5, 1200, 6);
+    check('orb count stored on the best run', s.best[1].orbs === 6);
+    recordBest(s, 1, 25, 900, 10);
+    check('slower run with more orbs improves the orb record, not the time', s.best[1].time === 18.5 && s.best[1].orbs === 10);
+    recordBest(s, 1, 15.2, 1500, 4);
+    check('faster run keeps the better orb record', s.best[1].time === 15.2 && s.best[1].orbs === 10);
+    const round = parseSave(serializeSave(s));
+    check('orb record survives a save round-trip', round.best[1].orbs === 10);
+  }
+  // A pre-M4 save (no orbs field) migrates: times kept, orbs unknown.
+  {
+    const old = parseSave(JSON.stringify({ version: 1, best: { 1: { time: 12.3, score: 1400 } }, unlocked: 2, settings: { muted: false, shake: 1, flash: true } }));
+    check('pre-M4 save keeps its best time', old.best[1].time === 12.3);
+    check('pre-M4 save has unknown orb count, not a false zero', old.best[1].orbs === null);
+    check('pre-M4 save has no Time Attack result', old.attack === null);
+  }
+  // Time Attack results: only finishes count, fastest total time wins.
+  {
+    const s = defaultSave();
+    const finish = { finished: true, timeLeft: 200, totalTime: 300, orbs: 90, deaths: 2, levels: 12, medal: 'gold' };
+    check('first Time Attack finish is a new best', recordAttackBest(s, finish) === true && s.attack.time === 300);
+    check('a slower finish does not replace the best', recordAttackBest(s, { ...finish, totalTime: 320, timeLeft: 180 }) === false && s.attack.time === 300);
+    check('a faster finish replaces the best', recordAttackBest(s, { ...finish, totalTime: 280, timeLeft: 220 }) === true && s.attack.time === 280);
+    check('a timeout is never a best', recordAttackBest(s, { finished: false, timeLeft: 0, totalTime: 461, orbs: 40, deaths: 9, levels: 5, medal: null }) === false && s.attack.time === 280);
+    const round = parseSave(serializeSave(s));
+    check('Time Attack best survives a save round-trip', round.attack && round.attack.time === 280 && round.attack.medal === 'gold');
+  }
+  // Full Time Attack, decision bot: finishes all 12 with time to spare.
+  const t0 = Date.now();
+  const ta = simulateTimeAttack(createDecisionBot);
+  console.log(`  (Time Attack decision bot: ${ta.finished ? 'FINISH' : 'FAIL'} at level ${ta.reachedLevel}, total ${ta.totalTime.toFixed(1)}s, ${ta.timeLeft.toFixed(1)}s left, ${ta.orbs} orbs, ${ta.deaths} deaths, medal ${ta.medal}, ${Date.now() - t0}ms)`);
+  check('decision bot finishes the Time Attack', ta.finished === true && ta.levels === 12, `reached=${ta.reachedLevel} timeLeft=${ta.timeLeft.toFixed(1)}`);
+  check('decision bot finishes Time Attack with a gold medal', ta.medal === 'gold', `timeLeft=${ta.timeLeft.toFixed(1)}`);
+  check('Time Attack total time is the sum of the level times', ta.totalTime > 140 && ta.totalTime < 160, `totalTime=${ta.totalTime.toFixed(1)}`);
+  // Full Time Attack, random bot: stalls on level 1 and runs the clock out.
+  const taRandom = simulateTimeAttack(() => createRandomBot(42));
+  console.log(`  (Time Attack random bot: ${taRandom.finished ? 'FINISH (SLOP!)' : 'FAIL'} at level ${taRandom.reachedLevel}, timeLeft ${taRandom.timeLeft.toFixed(1)}s)`);
+  check('random bot cannot finish the Time Attack', taRandom.finished === false);
+  check('random bot stalls on level 1 of the Time Attack', taRandom.reachedLevel === 1, `reached=${taRandom.reachedLevel}`);
+  check('random bot runs the Time Attack clock out', taRandom.timeLeft <= 0, `timeLeft=${taRandom.timeLeft.toFixed(1)}`);
 }
 
 // --- helpers ---

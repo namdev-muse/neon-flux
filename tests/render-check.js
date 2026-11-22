@@ -1,4 +1,4 @@
-// Neon Flux v0.3.4 — headless browser render check.
+// Neon Flux v0.4.0 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless browser, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE demo (the attract-mode bot actually
@@ -14,6 +14,10 @@
 //   - the autopilot (decision bot) collects orbs and clears level 1,
 //     the complete screen shows, and the best time is saved
 //   - pause focuses Resume; Enter resumes; R restarts
+//   - M4: Time Attack is locked on a fresh save (0/3) and unlocked with
+//     3 clears; the countdown HUD ticks, orbs add +2s (clock rises past
+//     the budget), the run advances 1 -> 2, medals show on the cards,
+//     and the timeout path ends the run with a Time Up screen
 //   - zero console errors and zero page errors
 //
 // Run: node tests/render-check.js (Chromium headless shell) or
@@ -114,8 +118,8 @@ try {
     throw new Error('game module did not initialise (window.__flux never appeared)');
   }
   const version = await page.evaluate(() => window.__flux.version);
-  if (version !== '0.3.4') throw new Error(`expected version 0.3.4, got ${version}`);
-  console.log('render-check: game module initialised, version 0.3.4');
+  if (version !== '0.4.0') throw new Error(`expected version 0.4.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.4.0');
 
   // Canvas exists and is on screen.
   const canvas = await page.evaluate(() => {
@@ -135,6 +139,18 @@ try {
   const playClass = await page.getAttribute('#btn-play', 'class');
   if (!playClass || !playClass.includes('primary')) throw new Error('Play is not the primary action');
   console.log('render-check: menu renders — no version text, Play primary');
+
+  // M4: Time Attack is a locked gate on a fresh save, not a dead button —
+  // disabled, with the unlock condition and progress in its label.
+  const attackLocked = await page.evaluate(() => {
+    const b = document.getElementById('btn-attack');
+    return { disabled: b.disabled, label: b.textContent };
+  });
+  if (!attackLocked.disabled) throw new Error('Time Attack must be locked on a fresh save');
+  if (!attackLocked.label.includes('0/3') || !attackLocked.label.includes('clear 3 levels')) {
+    throw new Error(`Time Attack lock label must name the gate and progress, got: ${attackLocked.label}`);
+  }
+  console.log(`render-check: Time Attack locked on a fresh save ("${attackLocked.label.trim()}")`);
 
   // Level select: 12 level cards, only level 1 unlocked on a fresh save.
   await page.click('#btn-levels');
@@ -239,17 +255,37 @@ try {
   // read the settled camScale first, then require the flip to push it
   // up by >5%. (v0.3.3 measured camScale 1.27 vs 1.19 base in a probe,
   // but the render check only ever asserted zoomT, a state number.)
+  // v0.4.0: sample the bundle IN-PAGE. The flip's trauma is small
+  // (0.12) and decays in ~75ms of game time, and under SwiftShader a
+  // single frame can take longer than that — the first v0.4.0 run
+  // failed here with shockwave 1, zoomT 0.84, trauma 0: the bundle
+  // HAD fired, but a feel() read after a waitForFunction + evaluate
+  // round-trip landed after the trauma was already gone. The sampler
+  // polls every 16ms in-page and keeps the maxima, so it measures
+  // what the flip actually did.
   const settleFeel = await page.evaluate(() => window.__flux.feel());
+  const bundlePromise = page.evaluate(() => new Promise((resolve) => {
+    const start = performance.now();
+    let maxTrauma = 0, maxCamScale = 0, maxRings = 0, seenFlip = false;
+    const iv = setInterval(() => {
+      const f = window.__flux.feel();
+      const i = window.__flux.info();
+      if (i.playerWorld.grav === -1) seenFlip = true;
+      maxTrauma = Math.max(maxTrauma, f.trauma);
+      maxCamScale = Math.max(maxCamScale, f.camScale);
+      maxRings = Math.max(maxRings, f.shockwaves);
+      if (performance.now() - start > 1200) { clearInterval(iv); resolve({ maxTrauma, maxCamScale, maxRings, seenFlip }); }
+    }, 16);
+  }));
   await page.keyboard.press('Space');
-  await page.waitForFunction(() => window.__flux.info().playerWorld.grav === -1, null, { timeout: 5000 });
+  const bundle = await bundlePromise;
+  if (!bundle.seenFlip) throw new Error('Space did not flip gravity');
   // M3: the flip fires its full bundle in the same frame — shockwave
   // ring + camera zoom pulse + trauma, not just the gravity change.
-  const flipFeel = await page.evaluate(() => window.__flux.feel());
-  if (flipFeel.shockwaves < 1) throw new Error(`flip fired no shockwave ring (feel: ${JSON.stringify(flipFeel)})`);
-  if (!(flipFeel.zoomT > 0)) throw new Error(`flip fired no camera zoom pulse (feel: ${JSON.stringify(flipFeel)})`);
-  if (!(flipFeel.camScale > settleFeel.camScale * 1.05)) throw new Error(`zoom pulse never reached the screen (camScale ${settleFeel.camScale.toFixed(3)} -> ${flipFeel.camScale.toFixed(3)}, need >5%)`);
-  if (!(flipFeel.trauma > 0)) throw new Error(`flip fired no trauma (feel: ${JSON.stringify(flipFeel)})`);
-  console.log(`render-check: flip fires its bundle — shockwave ${flipFeel.shockwaves}, zoom pulse ${flipFeel.zoomT.toFixed(2)} (camScale ${settleFeel.camScale.toFixed(3)} -> ${flipFeel.camScale.toFixed(3)}), trauma ${flipFeel.trauma.toFixed(2)}`);
+  if (bundle.maxRings < 1) throw new Error(`flip fired no shockwave ring (bundle: ${JSON.stringify(bundle)})`);
+  if (!(bundle.maxCamScale > settleFeel.camScale * 1.05)) throw new Error(`zoom pulse never reached the screen (camScale ${settleFeel.camScale.toFixed(3)} -> ${bundle.maxCamScale.toFixed(3)}, need >5%)`);
+  if (!(bundle.maxTrauma > 0)) throw new Error(`flip fired no trauma (bundle: ${JSON.stringify(bundle)})`);
+  console.log(`render-check: flip fires its bundle — shockwave ${bundle.maxRings}, zoom pulse (camScale ${settleFeel.camScale.toFixed(3)} -> ${bundle.maxCamScale.toFixed(3)}), trauma ${bundle.maxTrauma.toFixed(2)}`);
 
   // v0.3.3: pause freezes the juice. Flip, pause as soon as the flip
   // lands, then check the bundle is BIT-IDENTICAL after 1.5s of wall
@@ -432,6 +468,131 @@ try {
   if (!levelsAfter[1].unlocked) throw new Error('level 2 should be unlocked after clearing level 1');
   console.log('render-check: quit to menu; level 2 unlocked');
 
+  // --- M4: Time Attack, on a seeded save (3 clears = unlocked) ------
+  // A fresh profile cannot unlock the mode without clearing 3 levels,
+  // so this runs in a second context whose localStorage is seeded
+  // before the module loads: best times on levels 1-3 (all gold by
+  // par), level 4 unlocked.
+  // The first context is closed first: two SwiftShader pages compete
+  // for 1.5 CPUs, and the second page's click starved on RAF — the
+  // v0.4.0 first re-run failed here with #btn-levels "waiting for
+  // element to be visible, enabled and stable" for 30s, while the
+  // same button is stable and clickable in a lone-page probe.
+  await context.close();
+  const seedSave = {
+    version: 1,
+    best: {
+      1: { time: 7.5, score: 1337, orbs: 9 },
+      2: { time: 7.2, score: 1001, orbs: 5 },
+      3: { time: 7.9, score: 1251, orbs: 7 },
+    },
+    unlocked: 4, attack: null,
+    settings: { muted: false, shake: 1, flash: true },
+  };
+  const ctx2 = await browser.newContext({
+    viewport: { width: 1280, height: 720 },
+    timezoneId: 'Asia/Bangkok',
+    hasTouch: true,
+  });
+  const page2 = await ctx2.newPage();
+  page2.on('console', noteConsole);
+  page2.on('pageerror', (err) => errors.push(stamp() + ' pageerror: ' + String(err)));
+  await page2.addInitScript((seed) => {
+    localStorage.setItem('neon-flux-save-v1', JSON.stringify(seed));
+  }, seedSave);
+  await page2.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page2.waitForFunction(() => window.__flux, null, { timeout: 30000 });
+  if (!await page2.evaluate(() => window.__flux.isTimeAttackUnlocked())) {
+    throw new Error('Time Attack should be unlocked with 3 clears in the seeded save');
+  }
+  const attackBtn = await page2.evaluate(() => {
+    const b = document.getElementById('btn-attack');
+    return { disabled: b.disabled, label: b.textContent };
+  });
+  if (attackBtn.disabled) throw new Error('Time Attack button disabled on an unlocked save');
+  const menuBest = await page2.textContent('#menu-best');
+  if (!menuBest.includes('3 gold')) throw new Error(`menu medal line wrong: ${menuBest}`);
+  console.log(`render-check: Time Attack unlocked on the seeded save ("${attackBtn.label.trim()}"), menu shows "${menuBest.trim()}"`);
+
+  // Medals + orb records on the level cards. Settle first: this click
+  // lands right after page load, mid pop-in (0.45s + stagger), and a
+  // click's stability check needs a couple of frames to see it done.
+  await page2.waitForTimeout(1500);
+  await page2.click('#btn-levels');
+  await page2.waitForFunction(() => !document.getElementById('levels').classList.contains('hidden'), null, { timeout: 5000 });
+  const card1 = await page2.locator('#level-grid .level-card').first().textContent();
+  if (!card1.includes('Gold') || !card1.includes('◈ 9/12') || !card1.includes('7.50s')) {
+    throw new Error(`level 1 card must show its gold medal + orb record, got: ${card1}`);
+  }
+  console.log('render-check: level card shows medal + orb record ("Best 7.50s · ◈ 9/12 Gold")');
+  await page2.click('#btn-levels-back');
+  await page2.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden'), null, { timeout: 5000 });
+
+  // Start Time Attack: HUD shows the countdown (mm:ss) and TA 1/12.
+  await page2.click('#btn-attack');
+  await page2.waitForFunction(() => window.__flux.state.phase === 'playing', null, { timeout: 5000 });
+  const attack0 = await page2.evaluate(() => window.__flux.attack());
+  if (!attack0 || attack0.level !== 1) throw new Error(`Time Attack did not start at level 1: ${JSON.stringify(attack0)}`);
+  if (Math.abs(attack0.timeLeft - 461) > 2) throw new Error(`Time Attack clock should start at the 461s budget, got ${attack0.timeLeft}`);
+  const hudTime = await page2.textContent('#hud-time');
+  if (!/⏱ \d+:\d\d/.test(hudTime)) throw new Error(`HUD must show the countdown clock in Time Attack, got: ${hudTime}`);
+  const hudLevelTA = await page2.textContent('#hud-level');
+  if (!hudLevelTA.includes('TA 1/12')) throw new Error(`HUD must read TA 1/12 in Time Attack, got: ${hudLevelTA}`);
+  console.log(`render-check: Time Attack starts — clock ${hudTime.trim()}, ${hudLevelTA.trim()}`);
+
+  // Autopilot clears level 1: orbs add +2s each, so the clock ends UP
+  // past the 461s budget — the orb economy, visible in one number.
+  await page2.evaluate(() => window.__flux.autopilot(true));
+  await page2.waitForFunction(() => window.__flux.info().won === true, null, { timeout: 180000 });
+  await page2.evaluate(() => window.__flux.autopilot(false));
+  const attackAfterL1 = await page2.evaluate(() => window.__flux.attack());
+  if (!attackAfterL1 || attackAfterL1.orbs < 5) throw new Error(`Time Attack should have banked orbs on level 1, got ${JSON.stringify(attackAfterL1)}`);
+  if (!(attackAfterL1.timeLeft > 461)) throw new Error(`orb +2s must lift the clock past the 461s budget (orbs ${attackAfterL1.orbs}, timeLeft ${attackAfterL1.timeLeft.toFixed(1)})`);
+  console.log(`render-check: orbs fuel the clock — ${attackAfterL1.orbs} orbs, ${attackAfterL1.timeLeft.toFixed(1)}s left (past the 461s budget)`);
+  await page2.waitForFunction(() => window.__flux.state.phase === 'complete', null, { timeout: 5000 });
+  const completeTA = await page2.textContent('#complete');
+  if (!completeTA.includes('Gold medal') || !completeTA.includes('Level 1/12')) {
+    throw new Error(`complete screen in Time Attack must name the medal + level, got: ${completeTA.slice(0, 240)}`);
+  }
+  const savedTA = await page2.evaluate(() => window.__flux.save);
+  if (!savedTA.best[1] || savedTA.best[1].time <= 0) throw new Error('best time should be saved for level 1 after the Time Attack clear');
+  if (savedTA.attack !== null) throw new Error('an unfinished Time Attack must not record a best');
+  console.log('render-check: complete screen shows Gold medal + Level 1/12, best time saved, no attack best yet');
+
+  // Next Level continues the attack at level 2 on the same clock.
+  await page2.click('#btn-next');
+  await page2.waitForFunction(() => window.__flux.state.phase === 'playing' && window.__flux.state.levelId === 2, null, { timeout: 5000 });
+  const attackL2 = await page2.evaluate(() => window.__flux.attack());
+  if (!attackL2 || attackL2.level !== 2) throw new Error(`Time Attack did not advance to level 2: ${JSON.stringify(attackL2)}`);
+  const hudLevelL2 = await page2.textContent('#hud-level');
+  if (!hudLevelL2.includes('TA 2/12')) throw new Error(`HUD must read TA 2/12, got: ${hudLevelL2}`);
+  console.log(`render-check: Next Level continues the attack at level 2 (${hudLevelL2.trim()}, ${attackL2.timeLeft.toFixed(1)}s left)`);
+
+  // Timeout path (test hook forces the clock to 2s): the run ends with
+  // the Time Up screen, and a timeout never records a best.
+  await page2.evaluate(() => window.__flux.attackSetTimeLeft(2));
+  await page2.waitForFunction(() => window.__flux.state.phase === 'attack', null, { timeout: 10000 });
+  const attackTitle = await page2.textContent('#attack-title');
+  const attackSub = await page2.textContent('#attack-sub');
+  if (!attackTitle.includes('Time Up')) throw new Error(`timeout must show Time Up, got: ${attackTitle}`);
+  if (!attackSub.includes('level 2')) throw new Error(`timeout must name where the run ended, got: ${attackSub}`);
+  const savedAfterTimeout = await page2.evaluate(() => window.__flux.save);
+  if (savedAfterTimeout.attack !== null) throw new Error('a timed-out Time Attack must not record a best');
+  console.log(`render-check: timeout ends the run ("${attackTitle.trim()}" — ${attackSub.trim()}); no best recorded`);
+  await page2.screenshot({ timeout: 300000, path: path.join(SHOTS_DIR, 'attack-timeup-1280x720.png') });
+
+  // Retry restarts the attack from level 1 on a full clock.
+  await page2.click('#btn-attack-retry');
+  await page2.waitForFunction(() => window.__flux.state.phase === 'playing' && window.__flux.state.levelId === 1, null, { timeout: 5000 });
+  const attackRetry = await page2.evaluate(() => window.__flux.attack());
+  if (!attackRetry || attackRetry.level !== 1 || Math.abs(attackRetry.timeLeft - 461) > 2) {
+    throw new Error(`retry must restart the attack on a full clock, got ${JSON.stringify(attackRetry)}`);
+  }
+  console.log('render-check: Retry restarts the attack at level 1 on a full 461s clock');
+  await page2.evaluate(() => window.__flux.quitToMenu());
+  await page2.waitForFunction(() => window.__flux.state.phase === 'menu', null, { timeout: 5000 });
+  await ctx2.close();
+
   // --- verdict ---
   if (errors.length > 0) {
     console.error('render-check: CONSOLE/PAGE ERRORS:');
@@ -439,7 +600,7 @@ try {
     throw new Error(`render-check failed with ${errors.length} console/page error(s)`);
   }
   if (navAwayArtifacts > 0) console.log(`render-check: ignored ${navAwayArtifacts} Firefox "Navigated away" driver artifacts`);
-  console.log('render-check: PASS — menu + live demo, flash toggle, flip bundle + rest state, camera lookahead, screen-space movement + flip, death/respawn, autopilot clear + save, pause/resume/restart, zero console errors');
+  console.log('render-check: PASS — menu + live demo, flash toggle, flip bundle + rest state, camera lookahead, screen-space movement + flip, death/respawn, autopilot clear + save, pause/resume/restart, Time Attack (lock gate, countdown HUD, orb +2s, level advance, timeout + retry), zero console errors');
 } catch (err) {
   console.error('render-check: FAIL —', err.message);
   if (errors.length > 0) {
