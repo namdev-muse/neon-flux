@@ -1,4 +1,4 @@
-// Neon Flux v0.4.0 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
+// Neon Flux v0.4.1 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
 // Presentation layer: rendering, input, screens, audio, game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns
 // everything the player sees and hears. No build step, no Three.js.
@@ -551,7 +551,7 @@ function endTimeAttack(finished) {
     : `The clock ran out on level ${result.reachedLevel} — ${LEVELS[result.reachedLevel - 1].name}.`;
   $('attack-time').textContent = finished ? `Total ${fmtClock(totalTime)}` : `Lasted ${fmtClock(totalTime)}`;
   $('attack-left').textContent = finished ? `${fmtClock(result.timeLeft)} left on the clock` : `${fmtClock(Math.max(0, result.timeLeft))} left`;
-  $('attack-orbs').textContent = `◈ ${result.orbs} orbs (+${ORB_TIME_BONUS}s each)`;
+  $('attack-orbs').textContent = `◆ ${result.orbs} orbs (+${ORB_TIME_BONUS}s each)`;
   $('attack-deaths').textContent = `☠ ${deaths} deaths · ${levels}/12 levels`;
   showScreen('attack');
   updateHUD(true);
@@ -718,7 +718,7 @@ function updateHUD(force = false) {
     timeEl.textContent = `${run.time.toFixed(1)}s`;
     timeEl.classList.remove('low');
   }
-  $('hud-orbs').textContent = `◈ ${run.orbsGot}/${run.orbs.length}`;
+  $('hud-orbs').textContent = `◆ ${run.orbsGot}/${run.orbs.length}`;
   $('hud-score').textContent = `Score ${run.score}`;
   $('hud-deaths').textContent = `☠ ${run.deaths}`;
   $('hud-best').textContent = best ? `Best ${best.time.toFixed(2)}s` : 'Best —';
@@ -777,7 +777,7 @@ function refreshLevelSelect() {
     card.disabled = !unlocked;
     // Medal + orb record on the card: the replay reason, at a glance.
     const medal = best ? `<span class="level-medal medal-${medalForTime(def.id, best.time)}">${medalLabel(medalForTime(def.id, best.time))}</span>` : '';
-    const orbPart = best && best.orbs > 0 ? ` · ◈ ${best.orbs}/${parseLevel(def).orbs.length}` : '';
+    const orbPart = best && best.orbs > 0 ? ` · ◆ ${best.orbs}/${parseLevel(def).orbs.length}` : '';
     card.innerHTML = `<span class="level-num">${def.id}</span>`
       + `<span class="level-name">${def.name}</span>`
       + `<span class="level-meta">${unlocked ? (best ? `Best ${best.time.toFixed(2)}s${orbPart} ${medal}` : def.hint) : 'Clear the previous level to unlock'}</span>`;

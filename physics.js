@@ -1,4 +1,4 @@
-// Neon Flux v0.4.0 — pure simulation core (no DOM, no Canvas).
+// Neon Flux v0.4.1 — pure simulation core (no DOM, no Canvas).
 // 2D neon gravity-flip action-platformer. Run with Left/Right; one
 // button flips gravity, momentum preserved through the flip. There is
 // no jump — the flip IS the jump. Levels are hand-crafted tile maps:
@@ -23,7 +23,7 @@
 // Deterministic: fixed-step simulation (DT = 1/60), every hazard
 // cycle derived from the run clock, so identical inputs give
 // identical results.
-export const VERSION = '0.4.0';
+export const VERSION = '0.4.1';
 export const TILE = 40;
 export const ROWS = 14;
 export const DT = 1 / 60;
