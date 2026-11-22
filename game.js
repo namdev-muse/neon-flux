@@ -1,4 +1,4 @@
-// Neon Flux v0.3.1 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
+// Neon Flux v0.3.2 — 2D neon gravity-flip platformer (vanilla Canvas 2D).
 // Presentation layer: rendering, input, screens, audio, game feel.
 // The simulation lives in physics.js (pure, no DOM); this file owns
 // everything the player sees and hears. No build step, no Three.js.
@@ -250,7 +250,7 @@ function updateFeel(dt) {
   shakeX = (Math.random() * 2 - 1) * sh;
   shakeY = (Math.random() * 2 - 1) * sh;
   if (flashT > 0) flashT -= dt;
-  if (zoomT > 0) zoomT = Math.max(0, zoomT - dt * 2.5);
+  if (zoomT > 0) zoomT = Math.max(0, zoomT - dt * 1.2); // ~0.83s pulse: the 0.4s pulse was over before a still could catch it
   if (stretchT > 0) stretchT = Math.max(0, stretchT - dt);
   if (squashT > 0) squashT = Math.max(0, squashT - dt);
 }
@@ -312,16 +312,21 @@ function drawShockwaves() {
     const t = 1 - w.life / w.maxLife; // 0 -> 1
     const r = (8 + (w.maxR - 8) * (1 - Math.pow(1 - t, 3))) * s;
     const sx = wx2sx(w.x), sy = wy2sy(w.y);
-    ctx.globalAlpha = (1 - t) * 0.9;
+    // Alpha holds up through the ring's life (sqrt falloff): the linear
+    // fade was down to 0.24 by 0.44s, too dim to see in a still frame.
+    const a = Math.pow(1 - t, 0.5);
+    ctx.globalAlpha = a * 0.9;
     ctx.strokeStyle = w.color;
-    ctx.lineWidth = Math.max(1, w.width * s * (1 - t * 0.6));
+    ctx.shadowColor = w.color; ctx.shadowBlur = 14;
+    ctx.lineWidth = Math.max(1, w.width * s * (1 - t * 0.5));
     ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.stroke();
     // Inner echo ring, half the radius.
-    ctx.globalAlpha = (1 - t) * 0.4;
+    ctx.globalAlpha = a * 0.4;
     ctx.beginPath(); ctx.arc(sx, sy, r * 0.55, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.restore();
   ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
 }
 // Player trail (recent positions, for the motion streak).
 const trail = [];
@@ -535,8 +540,8 @@ function handleEvents(events) {
         SFX.flip();
         burst(p.x + 12, p.y + 16, 10, COL.player, 160, 0.4, 2.5);
         // Big, slow ring: the 90px/0.45s ring never registered in
-        // playtest stills. 130px/0.6s reads in a still and in motion.
-        spawnShockwave(p.x + 12, p.y + 16, COL.player, 130, 0.6, 5);
+        // playtest stills. 130px/0.7s reads in a still and in motion.
+        spawnShockwave(p.x + 12, p.y + 16, COL.player, 130, 0.7, 6);
         zoomT = 1; // camera zoom pulse (visual only)
         stretchT = 0.14; // stretch along the flip axis
         break;
@@ -563,8 +568,11 @@ function handleEvents(events) {
         break;
       case 'death':
         SFX.death();
-        burst(p.x + 12, p.y + 16, 34, COL.player, 320, 0.8, 4);
-        burst(p.x + 12, p.y + 16, 16, COL.hazard, 240, 0.7, 3);
+        // The trail piles up at the death spot (slow play stacks 26
+        // rects into a near-solid block) and reads as a body — clear it.
+        trail.length = 0;
+        burst(p.x + 12, p.y + 16, 48, COL.player, 320, 0.8, 4);
+        burst(p.x + 12, p.y + 16, 24, COL.hazard, 240, 0.7, 3);
         doHitStop(FEEDBACK.death.hitStop);
         doSlowMo(0.55);
         flash('244,114,182', 0.22);
