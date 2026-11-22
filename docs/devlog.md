@@ -1,5 +1,28 @@
 # Neon Flux — devlog
 
+## v0.3.1 — M3 playtest fix-forward (2026-11-22)
+
+- **Live playtest NO-GO triage (v0.3.0):** the tap-only playtest could not
+  see the flip ring or the zoom pulse in stills, and read the death beat
+  as an "instant cut to respawn" with the player "respawned upside-down".
+  Instrumental probes showed the respawn itself is correct (died
+  grav=-1 at y=62 on the ceiling, respawned grav=1 at y=488 on the floor)
+  and the orb combo works (max ×9 on the L1 autopilot) — the playtester
+  saw the frozen death-beat body, not the respawn, and never collected
+  two orbs within 1.5s.
+- **Fixes:** the player body is no longer drawn during the death beat
+  (it burst into particles; a frozen upside-down body read as a broken
+  respawn). The flip shockwave ring is bigger, thicker and longer
+  (130px / 0.6s / 5px, was 90px / 0.45s / 4px) and the zoom pulse is
+  stronger and slower (7%, decay 2.5/s, was 5% / 3.5/s) so both register
+  in a still frame as well as in motion.
+- **Not changed:** L1's first spike gate. The six tap-only deaths there
+  are the known tooling limit (no run speed → near-vertical flips);
+  the decision bot clears L1 in 7.5s/0 deaths and the autopilot in
+  7.62s/0 deaths with real timing. No mid-air double-flip either: flips
+  only work while standing (plus coyote/buffer) by design.
+- Smoke 180/180, bot gates unchanged, render check PASS.
+
 ## v0.3.0 — M3 feel & juice (2026-11-22)
 
 - **Camera:** follow now leans into the run — velocity lookahead (up to 140px) plus smooth gliding toward the target instead of snapping, so the view reads as a glide and the player never leaves the frame mid-run. A flip fires a short zoom pulse (visual only; the rig never moves colliders).
